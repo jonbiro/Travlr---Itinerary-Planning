@@ -1,0 +1,50 @@
+{
+  "name": "travlr",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "proxy": "http://localhost:3005",
+  "dependencies": {
+    "@pusher/chatkit-client": "^1.4.0",
+    "@react-google-maps/api": "^1.1.0",
+    "@react-simply/state": "^1.0.2",
+    "animate.css": "^3.7.0",
+    "antd": "^3.15.0",
+    "axios": "^0.18.0",
+    "dotenv": "^6.2.0",
+    "google-maps-react": "^2.0.2",
+    "jquery": "^3.3.1",
+    "libreact": "^2.12.2",
+    "moment": "^2.24.0",
+    "react": "^16.8.4",
+    "react-burger-menu": "^2.6.5",
+    "react-dom": "^16.8.4",
+    "react-foursquare": "^1.0.3",
+    "react-geolocated": "^2.4.1",
+    "react-google-maps": "^9.4.5",
+    "react-redux": "^6.0.1",
+    "react-router-dom": "^4.3.1",
+    "react-router-redux": "^4.0.8",
+    "react-scripts": "2.1.8",
+    "react-semantic-redux-form": "^1.2.6",
+    "react-sidebar": "^3.0.2",
+    "react-simply": "^0.1.0",
+    "semantic-ui-react": "^0.85.0",
+    "uikit": "^3.0.3"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "Components": "react-scripts Components",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": "react-app"
+  },
+  "browserslist": [
+    ">0.2%",
+    "not dead",
+    "not ie <= 11",
+    "not op_mini all"
+  ]
+}

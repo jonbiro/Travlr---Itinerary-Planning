@@ -1,0 +1,15 @@
+#cityshow {
+    flex-direction: row;
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+}
+
+#map {
+    width: 50%;
+    border-radius: 5%;
+}
+#itinerary {
+    width: 50%;
+    list-style-image: url('../travlr logos/deleteicon.png');
+}

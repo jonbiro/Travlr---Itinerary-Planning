@@ -1,0 +1,39 @@
+import React from "react";
+import { Button, Card, Icon, Image, Grid } from "semantic-ui-react";
+import { Link, withRouter } from "react-router-dom";
+
+const CityCard = props => (
+	<Grid.Column style={{ marginTop: "40px", marginBottom: "20px", marginRight: '20px', marginLeft: '20px' }}>
+		<Card raised style={{ margin: "auto" }}>
+			<Link
+				to={`/cities/${props.city.id}`}
+				// onClick={() => props.onSelect(props.city)}
+				// onClick={()=>props.history.push(`/cities/${props.city.id}`)}
+			>
+				<Card.Content>
+					<h3 style={{ color: "dark grey" }}>{props.city.name}</h3>
+				</Card.Content>
+				<Image
+					style={{ height: "200px" }}
+					src="https://fortunedotcom.files.wordpress.com/2015/10/stnmtz_20150716_68953.jpg?w=720&quality=85"
+				/>
+				<Card.Content style={{ color: "dark grey", fontSize: 14 }} extra>
+					<Icon name="user" /> Going with David
+				</Card.Content>
+			</Link>
+			<Button
+				fluid
+				color="blue"
+				animated="vertical"
+				onClick={() => props.deleteHandler(props.city)}
+			>
+				<Button.Content visible>Delete</Button.Content>
+				<Button.Content hidden>
+					<Icon name="trash alternate outline" />
+				</Button.Content>
+			</Button>
+		</Card>
+	</Grid.Column>
+);
+
+export default withRouter(CityCard);
