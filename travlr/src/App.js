@@ -83,7 +83,7 @@ class App extends Component {
               <Route
                 exact
                 path="/signup"
-                component={Signup}
+                render={() => this.checkAuthSignUp()}
               />
 	            <Route path="/cities/:id" render={() => this.checkAuthTripsID()} />
 	            <Route path="/trips" render={() => this.checkAuthTrips()} />

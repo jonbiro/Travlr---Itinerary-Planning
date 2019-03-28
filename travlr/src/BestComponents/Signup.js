@@ -9,7 +9,7 @@ import {
   Segment,
   Card
 } from "semantic-ui-react";
-import { withRouter } from "react-router-dom";
+import { Link, withRouter } from "react-router-dom";
 import logo from "../travlr logos/dogetravlr.png";
 
 
@@ -166,7 +166,7 @@ class Signup extends Component {
               </Segment>
             </Form>
             <Message>
-              Already have an account? <a href="/">Login</a>
+              Already have an account? <Link to={"/"}>Login</Link>
             </Message>
           </Grid.Column>
         </Grid>
