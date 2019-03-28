@@ -64,8 +64,8 @@ class App extends Component {
 			return <Login />;
 		}
 	};
-	
-	
+
+
 	render() {
     return (
         <>
@@ -83,12 +83,12 @@ class App extends Component {
               <Route
                 exact
                 path="/signup"
-                render={() => this.checkAuthSignUp()}
+                component={Signup}
               />
 	            <Route path="/cities/:id" render={() => this.checkAuthTripsID()} />
 	            <Route path="/trips" render={() => this.checkAuthTrips()} />
               <Route path="/" render={() => this.checkAuth()} />
-              
+
             </Switch>
           </div>
         </>
