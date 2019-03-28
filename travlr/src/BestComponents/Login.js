@@ -9,7 +9,7 @@ import {
   Segment,
   Card
 } from "semantic-ui-react";
-import { withRouter } from "react-router";
+import { Link, withRouter } from "react-router";
 import logo from "../travlr logos/dogetravlr.png";
 
 
@@ -120,7 +120,7 @@ class LoginForm extends Component {
               </Segment>
             </Form>
             <Message>
-              New to us? <a href="/signup">Sign Up</a>
+              New to us? <Link to={"/signup"}>Sign Up </Link>
             </Message>
           </Grid.Column>
         </Grid>
