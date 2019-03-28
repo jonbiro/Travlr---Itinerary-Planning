@@ -9,7 +9,7 @@ import {
   Segment,
   Card
 } from "semantic-ui-react";
-import { Link, withRouter } from "react-router";
+import { Link, withRouter } from "react-router-dom";
 import logo from "../travlr logos/dogetravlr.png";
 
 
