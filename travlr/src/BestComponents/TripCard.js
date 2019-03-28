@@ -1,6 +1,7 @@
 import React from "react";
 import { Button, Card, Icon, Image, Grid } from "semantic-ui-react";
 import { Link, withRouter } from "react-router-dom";
+import logo from "../travlr logos/travelabroad.png";
 
 const TripCard = props => (
   <Grid.Column style={{ marginTop: "40px", marginBottom: "20px", marginRight: '20px', marginLeft: '20px' }}>
@@ -14,7 +15,7 @@ const TripCard = props => (
         </Card.Content>
         <Image
           style={{ height: "200px" }}
-          src="https://images.unsplash.com/photo-1530521954074-e64f6810b32d?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=crop&w=1350&q=80"
+          src={logo}
         />
         <Card.Content style={{  fontSize: 14 }} extra>
           <Icon name="user" /> Going With David
