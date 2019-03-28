@@ -6,8 +6,12 @@ http://travlr-app.herokuapp.com     React with Ruby on Rails backend         htt
 
 Google Maps Api in Vanilla JS with Foursquare API search. React frontend with Ruby on Rails Backend
 
-
-
+.
+.
+.
+.
+.
+.
 This README would normally document whatever steps are necessary to get the
 application up and running.
 
