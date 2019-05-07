@@ -1,4 +1,4 @@
-# README
+# Travlr
 [![Youtube video](https://i.imgur.com/Pj8mVL0.jpg)](https://youtu.be/oz5oYOEf87U)
 
 
@@ -6,32 +6,36 @@ http://travlr-app.herokuapp.com     React with Ruby on Rails backend         htt
 
 Google Maps Api in Vanilla JS with Foursquare API search. React frontend with Ruby on Rails Backend
 
-.
-.
-.
-.
-.
-.
-This README would normally document whatever steps are necessary to get the
-application up and running.
 
-Things you may want to cover:
+### Installing
 
-* Ruby version
+  Run: "yarn --cwd travlr install && yarn --cwd travlr build"
 
-* System dependencies
+## Deployment
 
-* Configuration
+    Run: "cp -a travlr/build/. public/"
+   Then Run: "heroku-postbuild": "yarn build && yarn deploy"
 
-* Database creation
 
-* Database initialization
+## Built With
 
-* How to run the test suite
+* [React](https://reactjs.org/) - Front end interface
+* [React-Router-Dom](https://www.npmjs.com/package/react-router-dom) - Page navigation 
+* [Rails](https://rubyonrails.org/) - Save user credentials/information and references to event information
+* [PostgreSQL](https://www.postgresql.org/) - Database
+* [Bcrypt](https://www.npmjs.com/package/bcrypt) - Hash user credentials
+* [JWT](https://jwt.io/) - Secure transfer of credentials
+* [Semantic-UI](https://semantic-ui.com/) - CSS theming
+* [Semantic-UI React](https://react.semantic-ui.com/) - Styled react components
+* [Google Maps](https://cloud.google.com/maps-platform/) - Map, and user interactivity
+* [Foursquare](https://developer.foursquare.com/)  - Event and venue information
 
-* Services (job queues, cache servers, search engines, etc.)
 
-* Deployment instructions
+## Contributing
 
-* ...
-heroku
+Please read [CONTRIBUTING.md](https://gist.github.com/PurpleBooth/b24679402957c63ec426) for details on our code of conduct, and the process for submitting pull requests to us.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
+
