@@ -9,12 +9,12 @@ Google Maps Api in Vanilla JS with Foursquare API search. React frontend with Ru
 
 ### Installing
 
-  Run: "yarn --cwd travlr install && yarn --cwd travlr build"
+    Run: "yarn --cwd travlr install && yarn --cwd travlr build"
 
 ## Deployment
 
     Run: "cp -a travlr/build/. public/"
-   Then Run: "heroku-postbuild": "yarn build && yarn deploy"
+    Then Run: "heroku-postbuild": "yarn build && yarn deploy"
 
 
 ## Built With
@@ -33,7 +33,7 @@ Google Maps Api in Vanilla JS with Foursquare API search. React frontend with Ru
 
 ## Contributing
 
-Please read [CONTRIBUTING.md](https://gist.github.com/PurpleBooth/b24679402957c63ec426) for details on our code of conduct, and the process for submitting pull requests to us.
+Please read [CONTRIBUTING.md](https://gist.github.com/) for details on our code of conduct, and the process for submitting pull requests to us.
 
 ## License
 
