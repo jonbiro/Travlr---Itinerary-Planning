@@ -7,7 +7,27 @@ http://travlr-app.herokuapp.com     React with Ruby on Rails backend         htt
 
 Google Maps Api in Vanilla JS with Foursquare API search. React frontend with Ruby on Rails Backend
 
-### `Plan your travel itinerary with your friends`
+## `Plan your travel itinerary with your friends`
+
+##### Designed for you in mind
+
+Travlr makes it easy and fast to build an itinerary.
+
+Add places, events, notes and details in a snap.
+It’s easy & fast to add exactly what you want to your itinerary. Our base itinerary template captures delivers rich information like addresses, phone numbers and maps.
+
+
+Save trip ideas for things to add to your itinerary.
+Discover over 7 million restaurants & activities, and over 1 million hotels and vacation rentals.
+
+
+Access your itinerary from your phone.
+Take it with you on the go, Travlr is fully mobile friendly.
+
+Share your itinerary with others.
+Keep friends, trip mates, and family up to date on your trip details.
+
+
 
 ## Getting Started
 
@@ -15,11 +35,11 @@ Clone this repository in your computer
 
 ### Prerequisites
 
-The only dependency is [Node and NPM](https://nodejs.org/en/download/) (comes together with Node).
+The only dependency is [Node and NPM](https://nodejs.org/en/download/) (comes together with Node) or Yarn.
 
 ### Installing
 
-Open a terminal at the project root and run `npm install` to install all dependencies.
+Open a terminal at the project root and run `npm install` or '_yarn_' to install all dependencies.
 
 ### NPM scripts
 
@@ -32,7 +52,7 @@ Open a terminal at the project root and run `npm install` to install all depende
 
 ### Development
 
-1. Open a terminal at the app's root folder and run `npm start`
+1. Open a terminal at the app's root folder and run `npm start` or `yarn start`
 2. Start coding!
 
 ### Production
@@ -59,22 +79,4 @@ Please read [CONTRIBUTING](https://google.com) for details on the process for su
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](https://google.com) file for details
-
-##### Designed for you in mind
-
-Travlr makes it easy and fast to build an itinerary.
-
-Add places, events, notes and details in a snap.
-It’s easy & fast to add exactly what you want to your itinerary. Our base itinerary template captures delivers rich information like addresses, phone numbers and maps.
-
-
-Save trip ideas for things to add to your itinerary.
-Discover over 7 million restaurants & activities, and over 1 million hotels and vacation rentals.
-
-
-Access your itinerary from your phone.
-Take it with you on the go, Travlr is fully mobile friendly.
-
-Share your itinerary with others.
-Keep friends, trip mates, and family up to date on your trip details.
 
