@@ -1,26 +1,19 @@
-import React, { Component } from "react";
-import {
-  Button,
-  Form,
-  Grid,
-  Header,
-  Image,
-  Message,
-  Segment,
-  Card
-} from "semantic-ui-react";
-import { Link, withRouter } from "react-router-dom";
-import logo from "../travlr logos/dogetravlr.png";
+import React, {Component} from "react";
+import {Button, Card, Form, Grid, Header, Image, Message, Segment} from "semantic-ui-react";
+import {Link, withRouter} from "react-router-dom";
+import logo from "../Content/dogetravlr.png";
 
-
-class LoginForm extends Component {
+class Signup extends Component {
   state = {
     username: "",
-    password: ""
+    password: "",
+    firstname: "",
+    lastname: "",
+    email: ""
   };
 
-  login = () => {
-    fetch("/api/v1/login", {
+  register = () => {
+    fetch("/api/v1/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(this.state)
@@ -32,27 +25,38 @@ class LoginForm extends Component {
           throw new Error("Invalid Login");
         }
       })
-      .then(data => {
-        // console.log(data);
-        localStorage.setItem("accessToken", data.jwt);
-        localStorage.setItem("user_id", data.user.id);
-        localStorage.setItem("username", data.user.username);
-        this.props.history.push("/trips");
-      })
-      .catch(error => {
-        alert("Invalid Login", error);
-      });
+      .then(data => {})
+      .then(this.props.history.push("/"));
   };
 
-  nameHandle = e => {
+  usernameHandle = e => {
     this.setState({
       username: e.target.value
     });
   };
 
   passHandle = e => {
+    // console.log(e.target.value);
     this.setState({
       password: e.target.value
+    });
+  };
+
+  firstHandle = e => {
+    this.setState({
+      firstname: e.target.value
+    });
+  };
+
+  lastHandle = e => {
+    this.setState({
+      lastname: e.target.value
+    });
+  };
+
+  emailHandle = e => {
+    this.setState({
+      email: e.target.value
     });
   };
 
@@ -62,11 +66,6 @@ class LoginForm extends Component {
         style={{ backgroundColor: "transparent" }}
         className="animated bounce delay-3s"
       >
-        {/*
-          Heads up! The styles below are necessary for the correct render of this example.
-          You can do same with CSS, the main idea is that all the elements up to the `Grid`
-          below must have a height of 100%.
-        */}
         <style>{`
           body > div,
           body > div > div,
@@ -93,13 +92,13 @@ class LoginForm extends Component {
                   marginTop: "10px"
                 }}
               >
-                Log-in to your account
+                Create A New Account
               </div>
             </Header>
             <Form size="large">
               <Segment stacked>
                 <Form.Input
-                  onChange={this.nameHandle}
+                  onChange={this.usernameHandle}
                   fluid
                   icon="user"
                   iconPosition="left"
@@ -113,14 +112,37 @@ class LoginForm extends Component {
                   placeholder="Password"
                   type="password"
                 />
+                <div style={{ display: "flex" }}>
+                  <Form.Input
+                    onChange={this.firstHandle}
+                    style={{ width: "95%", right: "5px" }}
+                    icon="user circle outline"
+                    iconPosition="left"
+                    placeholder="First Name"
+                  />
+                  <Form.Input
+                    onChange={this.lastHandle}
+                    style={{ width: "95%", right: "5px" }}
+                    icon="user circle outline"
+                    iconPosition="left"
+                    placeholder="Last Name"
+                  />
+                </div>
+                <Form.Input
+                  onChange={this.emailHandle}
+                  fluid
+                  icon="envelope outline"
+                  iconPosition="left"
+                  placeholder="Email"
+                />
 
-                <Button onClick={this.login} color="blue" fluid size="large">
-                  Login
+                <Button onClick={this.register} color="blue" fluid size="large">
+                  Sign Up
                 </Button>
               </Segment>
             </Form>
             <Message>
-              New to us? <Link to={"/signup"}>Sign Up </Link>
+              Already have an account? <Link to={"/"}>Login</Link>
             </Message>
           </Grid.Column>
         </Grid>
@@ -129,4 +151,4 @@ class LoginForm extends Component {
   }
 }
 
-export default withRouter(LoginForm);
+export default withRouter(Signup);

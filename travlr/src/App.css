@@ -5,7 +5,6 @@
   text-align: center;
   font-family: "Roboto", sans-serif;
   font-size: medium;
-  /*line-height: 10px*/
 }
 li {
   margin-bottom: 10px;
@@ -13,15 +12,7 @@ li {
 .poo {
   margin-top: 10px;
 }
-/*.cards {*/
-/*flex-direction: row;*/
-/*display: flex;*/
-/*padding: 1rem;*/
 
-/*flex-wrap: wrap;*/
-
-/*justify-content: flex-start;*/
-/*}*/
 .App-logo {
   animation: App-logo-spin infinite 20s linear;
   height: 40vmin;
@@ -59,7 +50,7 @@ body {
   height: 100%;
   margin: 10px;
   padding: 10px;
-  background: url("./travlr logos/travel-background.jpg") no-repeat center
+  background: url("Content/travel-background.jpg") no-repeat center
     center fixed;
   background-size: cover;
 }
@@ -155,9 +146,9 @@ body {
 h1 {
   font-family: "Lobster", cursive;
 }
-.bigh1{
-    font-size: 5em;
+.bigh1 {
+  font-size: 5em;
 }
-.mediumh1{
-    font-size: 3.5em;
+.mediumh1 {
+  font-size: 3.5em;
 }

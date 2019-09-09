@@ -1,6 +1,11 @@
 
-## Travlr
+# Travlr
+[![Youtube video](https://i.imgur.com/Pj8mVL0.jpg)](https://youtu.be/oz5oYOEf87U)
 
+
+http://travlr-app.herokuapp.com     React with Ruby on Rails backend         https://youtu.be/oz5oYOEf87U 
+
+Google Maps Api in Vanilla JS with Foursquare API search. React frontend with Ruby on Rails Backend
 
 ### `Plan your travel itinerary with your friends`
 
@@ -32,13 +37,20 @@ Open a terminal at the project root and run `npm install` to install all depende
 
 ### Production
 
-Click [here](https://google.com) for the live version of this app.
+Click [here](http://travlr-app.herokuapp.com) for the live version of this app.
 
 ## Built With
 
-* [React](https://reactjs.org/) - A JavaScript library for building user interfaces
-* [Google Maps Api](https://google.com) - Google Maps API
-* [Foursquare API](https://developer.foursquare.com/) - Local search-and-discovery service app
+* [React](https://reactjs.org/) - Front end interface
+* [React-Router-Dom](https://www.npmjs.com/package/react-router-dom) - Page navigation 
+* [Rails](https://rubyonrails.org/) - Save user credentials/information and references to event information
+* [PostgreSQL](https://www.postgresql.org/) - Database
+* [Bcrypt](https://www.npmjs.com/package/bcrypt) - Hash user credentials
+* [JWT](https://jwt.io/) - Secure transfer of credentials
+* [Semantic-UI](https://semantic-ui.com/) - CSS theming
+* [Semantic-UI React](https://react.semantic-ui.com/) - Styled react components
+* [Google Maps](https://cloud.google.com/maps-platform/) - Map, and user interactivity
+* [Foursquare](https://developer.foursquare.com/)  - Event and venue information
 
 ## Contributing
 
@@ -61,69 +73,8 @@ Discover over 7 million restaurants & activities, and over 1 million hotels and 
 
 
 Access your itinerary from your phone.
-Take it with you on the go, Travlr/Travefy is fully mobile friendly.
+Take it with you on the go, Travlr is fully mobile friendly.
 
 Share your itinerary with others.
 Keep friends, trip mates, and family up to date on your trip details.
 
-## Further Ideas
-
-users can login and access their group's planning trips
-
-long polling group chat that saves to the DB for group members to see chat history or websockets with actioncable
-
-backend setup of groups have many users, users have many groups, users can see other users in group, content belongs to users of groups or to groups?
-
-users can add destinations to itinerary and comments on destination
-
-users can search google places/yelp/opentable for things to do and add to group itinerary
-
-users can change to a different trip with different friends
-
-ui box
-
-### Stretch Goals:
-
-use Redux
-
-use Calendar Api to show itinerary
-
-users can create chained itinerary of locations
-
-users can see reviews from google maps/yelp
-
-users can change to a different trip
-
-users can publish, search, and rate other itineraries that were made public
-
-Add youtube api to livestream/ or show videos of places
-
-Add a place to store comments, reviews, photos, journal, map track of where they went
-
-Let user make profile to make friends with other users like couchsurfing. 
-
-Put user generated map of places they've traveled to
-
-make PWA/mobile friendly/React Native/ Swift app
-
-Parallax cool effects
-
-flight and bus times from tripit api
-
-hostel API/ Hotel API
-
-money spent tracking per user
-
-places to sleep
-
-break down by day: Day 1:sleep in Giza, Day 2: travel to Cairo, see something, sleep in Cairo, Day 3:travel to Alexandria
-
-add roles to the friends like: food, accomadations,
-
-Things to do in that city. 3 and 4 star hotels. Youth hostels.  A few special restaurants. Weather in each month. History of the country. Government: democracy/healthy dictatorship/kingdom, who is the President or PM.  GDP.  world factbook api?
-
-modals for forms
-use redux or hooks
-use trello
-API that helped to snag a city pic for each city entered
-Dropdown autocomplete of city names

@@ -9,7 +9,8 @@
     width: 50%;
     border-radius: 5%;
 }
+
 #itinerary {
     width: 50%;
-    list-style-image: url('../travlr logos/deleteicon.png');
+    list-style-image: url('../Content/deleteicon.png');
 }

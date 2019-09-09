@@ -1,7 +1,6 @@
-import React, { Component } from "react";
-import { ROOT_URL } from "../Config";
+import React, {Component} from "react";
 import axios from "axios";
-import { withRouter } from "react-router-dom";
+import {withRouter} from "react-router-dom";
 import "./map.css";
 import CityItinerary from "./CityItinerary";
 
@@ -14,7 +13,7 @@ class CityShow extends Component {
     searchTerm: "attraction",
     success: "",
     places: [],
-	  showButton: false
+    showButton: false
   };
 
   componentDidMount() {
@@ -22,14 +21,11 @@ class CityShow extends Component {
   }
 
   fetchCity = () => {
-    // let poo = window.location.pathname.split("/");
-    // let poop = parseInt(poo.slice(poo.length - 1));
     let id = parseInt(this.props.match.params.id);
     if (this.state.city.name === null) {
       fetch(`/api/v1/cities/${id}`, {
         method: "GET",
         headers: {
-          // Accept: "application/json",
           "Content-Type": "application/json",
           Authorization: `Bearer ${localStorage.getItem("accessToken")}`
         }
@@ -45,9 +41,11 @@ class CityShow extends Component {
     }
   };
 
+  // Note: 3rd-Party API keys left unhidden on purpose for testing, instead of hidden in ENV file. These public keys are not registered to me personally.
+
   renderMap = () => {
     loadScript(
-      "https://maps.googleapis.com/maps/api/js?key=AIzaSyD1DrDBUd6GNL2EIBCxK-K0OjkTny8kbuA&&libraries=places&callback=initMap"
+      `https://maps.googleapis.com/maps/api/js?key=AIzaSyD1DrDBUd6GNL2EIBCxK-K0OjkTny8kbuA&&libraries=places&callback=initMap`
     );
     window.initMap = this.initMap;
   };
@@ -64,9 +62,6 @@ class CityShow extends Component {
     axios
       .get(endPoint + new URLSearchParams(parameters))
       .then(response => {
-        // console.log("response" + response);
-        // if (response.includes('warning')){console.log ('hey!!!')}
-        // debugger
         this.setState(
           {
             venues: response.data.response.groups[0].items,
@@ -81,7 +76,7 @@ class CityShow extends Component {
   };
 
   getVenuesSearch = query => {
-	  let po =this.state.venues
+    let po = this.state.venues;
     const endPoint = "https://api.foursquare.com/v2/venues/explore?";
     const parameters = {
       client_id: "PMHC2WA1VCBHVYOPPSJ0QSBYTLRF4PNJ04OWVWV0PZJ0QFIR",
@@ -91,7 +86,6 @@ class CityShow extends Component {
       v: "20192503"
     };
     axios.get(endPoint + new URLSearchParams(parameters)).then(response => {
-      // console.log("response" + response);
       if (response.data.response.groups[0].items.length > 0) {
         this.setState(
           {
@@ -100,16 +94,13 @@ class CityShow extends Component {
           },
           this.renderMap()
         );
-      }else {this.setState({venues: po})}
+      } else {
+        this.setState({ venues: po });
+      }
     });
   };
 
   saveFunc = (lat, lng, name) => {
-    //problem is that i dont have access to props so I can't set the relationship required trip_id to this.props.trip.id
-    // also can't do this.props.history.push("/trips");
-    // console.log(this);
-    // let poo = window.location.pathname.split("/");
-    // let poop = parseInt(poo.slice(poo.length - 1));
     let data = {
       trip_id: this.state.city.trip_id,
       lat: lat,
@@ -126,11 +117,7 @@ class CityShow extends Component {
       body: JSON.stringify(data)
     })
       .then(res => res.json())
-      .then(
-        json =>
-          // console.log("poo" + json) ||
-          this.setState({ places: [...this.state.places, json] })
-      );
+      .then(json => this.setState({ places: [...this.state.places, json] }));
   };
 
   initMap = () => {
@@ -155,14 +142,13 @@ class CityShow extends Component {
         );
       });
     });
-    // Display Dynamic Markers // I should use forEach instead of map
+    // Display Dynamic Markers
     this.state.venues.forEach(myVenue => {
       let contentString = `${myVenue.venue.name} <br> ${
         myVenue.venue.categories[0].name
       } <br>`;
 
       // Create A Marker
-      //   console.log(myVenue.venue.location.lat)
       let marker = new window.google.maps.Marker({
         position: {
           lat: myVenue.venue.location.lat,
@@ -196,27 +182,34 @@ class CityShow extends Component {
     this.getVenuesSearch(e.target.name.value);
   };
 
-	deletePlace = place => {
-		let deletedObjFilter =this.state.places.filter(placeObj => place.id !== placeObj.id);
-		fetch(`/api/v1/places/${place.id}`, {
-			method: "delete",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${localStorage.getItem("accessToken")}`
-			}}).then(() =>this.setState({
-			places: deletedObjFilter, showButton: !this.state.showButton
-		}))
-	};
-deleteButton = () => {
-	this.setState({showButton: !this.state.showButton})
-}
+  deletePlace = place => {
+    let deletedObjFilter = this.state.places.filter(
+      placeObj => place.id !== placeObj.id
+    );
+    fetch(`/api/v1/places/${place.id}`, {
+      method: "delete",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${localStorage.getItem("accessToken")}`
+      }
+    }).then(() =>
+      this.setState({
+        places: deletedObjFilter,
+        showButton: !this.state.showButton
+      })
+    );
+  };
+  deleteButton = () => {
+    this.setState({ showButton: !this.state.showButton });
+  };
+
   render() {
     return (
       <div>
-        <h1 className='bigh1'>{this.state.city.name}</h1>
+        <h1 className="bigh1">{this.state.city.name}</h1>
 
         <form onSubmit={this.searchInputFS}>
-          <label >
+          <label>
             Search for something to do/eat in {this.state.city.name}:{"   "}
             <input type="text" name="name" />
           </label>
@@ -227,7 +220,12 @@ deleteButton = () => {
         <div id="cityshow">
           <div id="map" className="fade" />
           <div id="itinerary">
-            <CityItinerary places={this.state.places} deletePlace={this.deletePlace} showDelete={this.state.showButton} deleteButton={this.deleteButton}/>
+            <CityItinerary
+              places={this.state.places}
+              deletePlace={this.deletePlace}
+              showDelete={this.state.showButton}
+              deleteButton={this.deleteButton}
+            />
           </div>
         </div>
       </div>

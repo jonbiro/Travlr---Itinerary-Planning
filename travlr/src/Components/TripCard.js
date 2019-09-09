@@ -1,11 +1,18 @@
 import React from "react";
-import { Button, Card, Icon, Image, Grid } from "semantic-ui-react";
-import { Link, withRouter } from "react-router-dom";
-import logo from "../travlr logos/travelabroad.png";
+import {Button, Card, Grid, Icon, Image} from "semantic-ui-react";
+import {Link, withRouter} from "react-router-dom";
+import logo from "../Content/travelabroad.png";
 
 const TripCard = props => (
-  <Grid.Column style={{ marginTop: "40px", marginBottom: "20px", marginRight: '20px', marginLeft: '20px' }}>
-    <Card className='ui card' raised style={{ margin: "auto" }}>
+  <Grid.Column
+    style={{
+      marginTop: "40px",
+      marginBottom: "20px",
+      marginRight: "20px",
+      marginLeft: "20px"
+    }}
+  >
+    <Card className="ui card" raised style={{ margin: "auto" }}>
       <Link
         to={`/trips/${props.trip.id}`}
         onClick={() => props.onSelect(props.trip)}
@@ -13,11 +20,8 @@ const TripCard = props => (
         <Card.Content>
           <h3 style={{ color: "dark grey" }}>{props.trip.destination}</h3>
         </Card.Content>
-        <Image
-          style={{ height: "200px" }}
-          src={logo}
-        />
-        <Card.Content style={{  fontSize: 14 }} extra>
+        <Image style={{ height: "200px" }} src={logo} />
+        <Card.Content style={{ fontSize: 14 }} extra>
           <Icon name="user" /> Going With David
         </Card.Content>
       </Link>

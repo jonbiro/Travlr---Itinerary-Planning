@@ -1,13 +1,10 @@
-import React, { Component } from "react";
+import React, {Component} from "react";
 import Trip from "./TripCard";
-// import Grid from "antd/es/card/Grid";
-// import {AxiosInstance as axios} from "axios";
 import NewTripForm from "./NewTripForm";
-import { Route, Switch, withRouter } from "react-router-dom";
-// import TripCard from "../components/TripCard";
+import {Route, Switch, withRouter} from "react-router-dom";
 import Login from "./Login";
 import TripCardMainCityContainer from "./TripCardMainCityContainer";
-// import CityShow from "./CityShow";
+
 
 class TripContainer extends Component {
   state = {
@@ -28,7 +25,6 @@ class TripContainer extends Component {
       .then(res => res.json())
       .then(trips => {
         let results = trips.data;
-        // console.log(results);
         this.setState({
           trips: results
         });
@@ -57,14 +53,12 @@ class TripContainer extends Component {
   };
 
   changeHandler = e => {
-    // console.log(e.target.value);
     this.setState({
       destination: e.target.value
     });
   };
 
   onSelect = trip => {
-    // console.log("setnewtrip", trip);
     localStorage.setItem("destination", trip.id);
   };
 
@@ -79,10 +73,6 @@ class TripContainer extends Component {
   };
 
   showTrips = () => {
-    // let showEvent= this.state.trips.map(atrip => {
-    //   return <Trip key={atrip.id} trip={atrip} onSelect={this.onSelect} deleteHandler={this.deleteHandler}/>;
-    // });
-    // return showEvent
     return this.state.trips.map(aTrip => {
       return (
         <Trip
@@ -100,8 +90,6 @@ class TripContainer extends Component {
     let trip = this.state.trips.find(
       tripObj => tripObj.id === parseInt(paramId)
     );
-    // console.log("this " + trip.id);
-
     if (localStorage.getItem("accessToken")) {
       return <TripCardMainCityContainer trip={trip} />;
     } else {
@@ -123,10 +111,6 @@ class TripContainer extends Component {
               </>
             )}
           />
-          {/*<Route*/}
-	          {/*path={"/cities/:id"}*/}
-	          {/*component={CityShow}*/}
-          {/*/>*/}
           <Route
             path={"/"}
             render={() => {
@@ -137,8 +121,7 @@ class TripContainer extends Component {
                     destination={this.state.destination}
                     createTrip={this.createTrip}
                   />
-
-                  <div className='ui centered cards' >{this.showTrips()}</div>
+                  <div className="ui centered cards">{this.showTrips()}</div>
                 </>
               );
             }}

@@ -1,11 +1,10 @@
-import React, { Component } from "react";
-import { ROOT_URL } from "../Config";
+import React, {Component} from "react";
 
 class CityItinerary extends Component {
   state = {
     places: [],
     showDelete: this.props.showDelete,
-	  placeToDelete: {}
+    placeToDelete: {}
   };
 
   componentDidMount() {
@@ -18,7 +17,6 @@ class CityItinerary extends Component {
     fetch(`/api/v1/cities/${id}`, {
       method: "GET",
       headers: {
-        // Accept: "application/json",
         "Content-Type": "application/json",
         Authorization: `Bearer ${localStorage.getItem("accessToken")}`
       }
@@ -30,25 +28,23 @@ class CityItinerary extends Component {
         });
       });
   };
-  showButton = (place) => {
-  	this.props.deleteButton()
-    this.setState({  placeToDelete: place });
+  showButton = place => {
+    this.props.deleteButton();
+    this.setState({ placeToDelete: place });
   };
   deleteButton = () => {
     return (
       <>
         <br />
-        <button onClick={() => this.props.deletePlace(this.state.placeToDelete)} className="navitem">
+        <button
+          onClick={() => this.props.deletePlace(this.state.placeToDelete)}
+          className="navitem"
+        >
           Delete
         </button>
       </>
     );
   };
-
-	//     }}).then(console.log).then(() =>this.setState({
-	//     showDelete: !this.state.showDelete, placeToDelete: {}, places: deletedObjFilter
-  //   }))
-  // };
 
   placesMapped = () => {
     if (this.props.places.length > 0) {
@@ -65,12 +61,9 @@ class CityItinerary extends Component {
   };
 
   render() {
-    // console.log(this.state)
     return (
       <div>
-        <h1 className='mediumh1'>Itinerary:</h1>
-
-        {/*{console.log(this.state.places)}*/}
+        <h1 className="mediumh1">Itinerary:</h1>
         {this.props.places.length === 0 ? null : this.placesMapped()}
         {this.props.showDelete ? this.deleteButton() : null}
       </div>
