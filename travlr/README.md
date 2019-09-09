@@ -3,13 +3,11 @@
 [![Youtube video](https://i.imgur.com/Pj8mVL0.jpg)](https://youtu.be/oz5oYOEf87U)
 
 
-http://travlr-app.herokuapp.com     React with Ruby on Rails backend         https://youtu.be/oz5oYOEf87U 
+[Live](http://travlr-app.herokuapp.com)     React with Ruby on Rails backend         [Youtube](https://youtu.be/oz5oYOEf87U)
 
 Google Maps Api in Vanilla JS with Foursquare API search. React frontend with Ruby on Rails Backend
 
 ## `Plan your travel itinerary with your friends`
-
-##### Designed for you in mind
 
 Travlr makes it easy and fast to build an itinerary.
 
@@ -35,11 +33,11 @@ Clone this repository in your computer
 
 ### Prerequisites
 
-The only dependency is [Node and NPM](https://nodejs.org/en/download/) (comes together with Node) or Yarn.
+The only dependency is [Node and NPM](https://nodejs.org/en/download/) (comes together with Node) or [Yarn](https://yarnpkg.com).
 
 ### Installing
 
-Open a terminal at the project root and run `npm install` or '_yarn_' to install all dependencies.
+Open a terminal at the project root and run `npm install` or `yarn` to install all dependencies.
 
 ### NPM scripts
 
