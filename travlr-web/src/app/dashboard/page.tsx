@@ -32,6 +32,7 @@ import { TripCustomizationDialog } from "@/components/trip/trip-customization-di
 import { MemoryKeeper } from "@/components/trip/memory-keeper"
 import { CalendarSyncDialog } from "@/components/trip/calendar-sync-dialog"
 import { ExportMenu } from "@/components/trip/export-menu"
+import { FlightTracker } from "@/components/trip/flight-tracker"
 
 export default function DashboardPage() {
     const [trip, setTrip] = useState<Trip | null>(null)
@@ -42,8 +43,9 @@ export default function DashboardPage() {
                 <ResizablePanel defaultSize={30} minSize={20} maxSize={50}>
                     <Tabs defaultValue="itinerary" className="flex flex-col h-full border-r">
                         <div className="p-4 border-b bg-muted/20">
-                            <TabsList className="grid w-full grid-cols-6">
+                            <TabsList className="grid w-full grid-cols-7">
                                 <TabsTrigger value="itinerary">Trips</TabsTrigger>
+                                <TabsTrigger value="flights">Flights</TabsTrigger>
                                 <TabsTrigger value="weather">Weather</TabsTrigger>
                                 <TabsTrigger value="expenses">Expenses</TabsTrigger>
                                 <TabsTrigger value="memories">Memories</TabsTrigger>
@@ -150,6 +152,10 @@ export default function DashboardPage() {
 
                         <TabsContent value="memories" className="flex-1 flex flex-col min-h-0 data-[state=inactive]:hidden">
                             <MemoryKeeper tripId={trip ? "demo-trip" : undefined} />
+                        </TabsContent>
+
+                        <TabsContent value="flights" className="flex-1 flex flex-col min-h-0 data-[state=inactive]:hidden">
+                            <FlightTracker tripId={trip ? "demo-trip" : undefined} />
                         </TabsContent>
                     </Tabs>
                 </ResizablePanel>
