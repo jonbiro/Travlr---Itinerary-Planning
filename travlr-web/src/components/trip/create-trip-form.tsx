@@ -35,10 +35,12 @@ import { cn } from "@/lib/utils"
 // import { generateTrip } from "@/app/actions/generate-trip" // We will create this next
 import { toast } from "sonner"
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function CreateTripForm({ onSuccess }: { onSuccess?: (data: any) => void }) {
     const [isLoading, setIsLoading] = useState(false)
 
     const form = useForm<CreateTripValues>({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         resolver: zodResolver(createTripSchema) as any,
         defaultValues: {
             interests: [],

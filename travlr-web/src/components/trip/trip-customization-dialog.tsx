@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Palette, Image, Check, Loader2 } from "lucide-react"
+import { Palette, Image as ImageIcon, Check, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -183,7 +183,7 @@ export function TripCustomizationDialog({
                             Colors
                         </TabsTrigger>
                         <TabsTrigger value="images" className="gap-2">
-                            <Image className="h-4 w-4" />
+                            <ImageIcon className="h-4 w-4" />
                             Background
                         </TabsTrigger>
                     </TabsList>

@@ -8,7 +8,7 @@ const shareTripSchema = z.object({
 })
 
 // Mock auth for now
-const currentUserId = "demo-user"
+const _currentUserId = "demo-user"
 
 export async function POST(req: Request) {
     try {

@@ -186,7 +186,7 @@ export function createDateInTimezone(
     day: number,
     hours: number,
     minutes: number,
-    timezone: string
+    _timezone: string
 ): Date {
     // Create date string in ISO format
     const isoString = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`

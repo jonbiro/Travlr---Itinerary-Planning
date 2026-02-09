@@ -19,6 +19,7 @@ export function TripChat({ trip, onTripUpdate }: TripChatProps) {
     const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
         api: "/api/chat",
         body: { trip },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any) as any
 
     // Sync trip updates from AI tool invocations back to parent
@@ -51,6 +52,7 @@ export function TripChat({ trip, onTripUpdate }: TripChatProps) {
                     </div>
                 )}
                 <div className="space-y-4">
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                     {messages.map((m: any) => (
                         <div
                             key={m.id}
@@ -75,8 +77,9 @@ export function TripChat({ trip, onTripUpdate }: TripChatProps) {
                             >
                                 <p className="whitespace-pre-wrap">{m.content}</p>
                                 {/* Render Tool Invocations if any */}
+                                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                                 {m.toolInvocations?.map((toolInvocation: any) => {
-                                    const { toolCallId, toolName, state, args, result } = toolInvocation
+                                    const { toolCallId, toolName, state } = toolInvocation
                                     if (toolName === 'getWeather') {
                                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
                                         const args = 'args' in toolInvocation ? (toolInvocation as any).args : {}

@@ -5,7 +5,7 @@ import { Cloud, Sun, CloudRain, CloudSnow, Zap, Wind, Droplets, Loader2 } from "
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-import type { WeatherDay, WeatherForecast } from "@/lib/weather-service"
+import type { WeatherForecast } from "@/lib/weather-service"
 
 interface WeatherForecastProps {
     destination?: string

@@ -17,7 +17,6 @@ import {
     generateGoogleCalendarUrl,
     generateOutlookCalendarUrl,
     tripToCalendarEvents,
-    type CalendarEvent
 } from "@/lib/calendar-service"
 
 interface CalendarSyncDialogProps {

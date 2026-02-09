@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
 // import { authOptions } from "@/app/api/auth/[...nextauth]/route" // Adjust import path as needed, or use a simpler check for now if auth options aren't exported there
 import { prisma } from "@/lib/prisma" // Assuming prisma client is exported from here
 import { z } from "zod"
@@ -7,7 +6,7 @@ import { z } from "zod"
 // Temporary auth mock if authOptions not found, we'll try to use a standard getSession approach or just check headers if we were using middleware, but let's assume standard next-auth for now.
 // If your project uses a different auth setup, please adjust.
 
-export async function GET(req: Request) {
+export async function GET(_req: Request) {
     try {
         // const session = await getServerSession(authOptions)
         // if (!session || !session.user) {

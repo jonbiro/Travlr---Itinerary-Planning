@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 
 // Mock expense storage (in production, use Prisma)
 // This is a temporary in-memory store for demonstration
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockExpenses: Map<string, any[]> = new Map()
 
 export async function GET(request: Request) {

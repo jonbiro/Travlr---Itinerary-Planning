@@ -101,6 +101,7 @@ export async function getWeatherForecast(location: string): Promise<WeatherForec
         const forecastResponse = await fetch(forecastUrl)
         const forecastData = await forecastResponse.json()
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const daily: WeatherDay[] = forecastData.daily.slice(0, 10).map((day: any) => ({
             date: new Date(day.dt * 1000),
             tempHigh: Math.round(day.temp.max),

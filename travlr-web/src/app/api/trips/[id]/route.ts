@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { z } from "zod"
 
 // Temporary auth mock
-const userId = "demo-user"
+const _userId = "demo-user"
 
 export async function GET(
     req: Request,

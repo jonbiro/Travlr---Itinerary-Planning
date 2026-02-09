@@ -34,14 +34,14 @@ export async function POST(req: Request) {
                         location,
                     }
                 },
-            } as any),
+            } as any),  // eslint-disable-line @typescript-eslint/no-explicit-any
             suggestDestinations: tool({
                 description: "Suggest travel destinations based on preferences",
                 parameters: z.object({
                     preferences: z.string().describe("User preferences like 'beach', 'hiking', 'history'"),
                     budget: z.enum(["budget", "moderate", "luxury"]).optional(),
                 }),
-                execute: async ({ preferences }: { preferences: string }) => {
+                execute: async ({ preferences: _preferences }: { preferences: string }) => {
                     // Mock suggestions
                     return {
                         suggestions: [
@@ -51,7 +51,7 @@ export async function POST(req: Request) {
                         ]
                     }
                 }
-            } as any),
+            } as any),  // eslint-disable-line @typescript-eslint/no-explicit-any
             planRoute: tool({
                 description: "Plan a route between two locations",
                 parameters: z.object({
@@ -68,7 +68,7 @@ export async function POST(req: Request) {
                         steps: [`Start at ${origin}`, "Go straight 5km", `Arrive at ${destination}`]
                     }
                 }
-            } as any),
+            } as any),  // eslint-disable-line @typescript-eslint/no-explicit-any
             updateItinerary: tool({
                 description: "Update the trip itinerary with new activities",
                 parameters: z.object({
@@ -81,7 +81,7 @@ export async function POST(req: Request) {
                         location: z.string(),
                     }).describe("The activity details")
                 }),
-                execute: async ({ day, action, activity }: { day: number, action: string, activity: any }) => {
+                execute: async ({ day, action, activity }: { day: number, action: string, activity: any }) => {  // eslint-disable-line @typescript-eslint/no-explicit-any
                     // Deep clone the trip to avoid mutation issues (though here it's a fresh object from req)
                     // Note: In a real app, we might want to validate 'trip' existence.
                     const updatedTrip = JSON.parse(JSON.stringify(trip || { days: [] }))
@@ -89,21 +89,21 @@ export async function POST(req: Request) {
                     if (!updatedTrip.days) updatedTrip.days = []
 
                     // Ensure the day exists
-                    let dayPlan = updatedTrip.days.find((d: any) => d.day === day)
+                    let dayPlan = updatedTrip.days.find((d: any) => d.day === day)  // eslint-disable-line @typescript-eslint/no-explicit-any
                     if (!dayPlan) {
                         dayPlan = { day, theme: "New Day", activities: [] }
                         updatedTrip.days.push(dayPlan)
                         // Sort days just in case
-                        updatedTrip.days.sort((a: any, b: any) => a.day - b.day)
+                        updatedTrip.days.sort((a: any, b: any) => a.day - b.day)  // eslint-disable-line @typescript-eslint/no-explicit-any
                     }
 
                     if (action === "add") {
                         dayPlan.activities.push(activity)
                     } else if (action === "remove") {
-                        dayPlan.activities = dayPlan.activities.filter((a: any) => a.name !== activity.name)
+                        dayPlan.activities = dayPlan.activities.filter((a: any) => a.name !== activity.name)  // eslint-disable-line @typescript-eslint/no-explicit-any
                     } else if (action === "replace") {
                         // Simple replace logic based on name matching or just add
-                        dayPlan.activities = dayPlan.activities.map((a: any) => a.name === activity.name ? activity : a)
+                        dayPlan.activities = dayPlan.activities.map((a: any) => a.name === activity.name ? activity : a)  // eslint-disable-line @typescript-eslint/no-explicit-any
                     }
 
                     return {
@@ -114,9 +114,9 @@ export async function POST(req: Request) {
                         action
                     }
                 }
-            } as any)
+            } as any)  // eslint-disable-line @typescript-eslint/no-explicit-any
         },
     })
 
-    return (result as any).toDataStreamResponse()
+    return (result as any).toDataStreamResponse()  // eslint-disable-line @typescript-eslint/no-explicit-any
 }

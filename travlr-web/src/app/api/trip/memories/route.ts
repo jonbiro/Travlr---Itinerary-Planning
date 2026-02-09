@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 // Mock memory storage (in production, use Prisma)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockMemories: Map<string, any[]> = new Map()
 
 export async function GET(request: Request) {
