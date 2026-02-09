@@ -1,23 +1,29 @@
 export interface Activity {
+    id?: string
     name: string
     description: string
-    time: string
+    time: string // or startTime/endTime
     location: string
     coordinates?: { lat: number; lng: number }
+    order?: number
 }
 
 export interface DayPlan {
-    day: number
+    id?: string
+    day: number // dayNumber
+    date?: string // ISO string
     theme: string
     activities: Activity[]
 }
 
 export interface Trip {
-    tripName: string
-    summary: string
+    id: string
+    tripName: string // or name
     destination: string
-    startDate: string
-    endDate: string
-    budget: string
+    startDate: string // ISO string
+    endDate: string // ISO string
+    budget: string | number
     days: DayPlan[]
+    // Add other fields as needed
+    currency?: string
 }

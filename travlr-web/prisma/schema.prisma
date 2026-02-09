@@ -69,7 +69,8 @@ model VerificationToken {
 
 model Trip {
   id          String   @id @default(cuid())
-  name        String
+  name        String?  // Made optional to support "New Trip" without immediate name, or default
+  tripName    String?  // Alias or specific name field if 'name' is used for internal ID
   destination String?
   startDate   DateTime?
   endDate     DateTime?
@@ -81,9 +82,49 @@ model Trip {
   owner       User     @relation("TripOwner", fields: [userId], references: [id], onDelete: Cascade)
   
   members     TripUser[]
+  days        Day[]
   cities      City[]
   expenses    Expense[]
   memories    Memory[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Day {
+  id        String   @id @default(cuid())
+  tripId    String
+  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  
+  date      DateTime
+  dayNumber Int      // Day 1, Day 2, etc.
+  theme     String?  // E.g., "Cultural Exploration", "Beach Day"
+  
+  activities ItineraryItem[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tripId, dayNumber])
+}
+
+model ItineraryItem {
+  id          String   @id @default(cuid())
+  dayId       String
+  day         Day      @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  
+  name        String
+  description String?  @db.Text
+  startTime   String?  // e.g. "10:00 AM" - Consider using separate DateTime fields for strict sorting if needed
+  endTime     String?
+  location    String?
+  lat         Decimal?
+  lng         Decimal?
+  
+  order       Int      @default(0)
+  
+  placeId     String?
+  place       Place?   @relation(fields: [placeId], references: [id])
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -163,6 +204,8 @@ model Place {
   
   cityId       String
   city         City     @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  
+  itineraryItems ItineraryItem[]
   
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
