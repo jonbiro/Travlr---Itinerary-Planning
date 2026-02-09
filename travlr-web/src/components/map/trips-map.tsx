@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { APIProvider, Map, AdvancedMarker, Pin } from "@vis.gl/react-google-maps"
 
 // Default center (San Francisco)
@@ -8,8 +8,10 @@ const DEFAULT_CENTER = { lat: 37.7749, lng: -122.4194 }
 const DEFAULT_ZOOM = 12
 
 export default function TripsMap() {
-    const [center, setCenter] = useState(DEFAULT_CENTER)
-    const [zoom, setZoom] = useState(DEFAULT_ZOOM)
+    // Use constants directly since setters were unused
+    const center = DEFAULT_CENTER
+    const zoom = DEFAULT_ZOOM
+
 
     const mapOptions = useMemo(() => ({
         mapId: "DEMO_MAP_ID", // Using a demo map ID for development as required by Advanced Markers

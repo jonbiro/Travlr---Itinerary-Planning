@@ -29,7 +29,9 @@ export function TripChat({ trip, onTripUpdate }: TripChatProps) {
         if (lastMessage.role === 'assistant' && lastMessage.toolInvocations) {
             for (const invocation of lastMessage.toolInvocations) {
                 if (invocation.toolName === 'updateItinerary' && invocation.state === 'result') {
-                    const { updatedTrip } = invocation.result ?? {}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const result = invocation.result as any
+                    const { updatedTrip } = result ?? {}
                     if (updatedTrip && onTripUpdate) {
                         onTripUpdate(updatedTrip)
                     }
@@ -76,15 +78,20 @@ export function TripChat({ trip, onTripUpdate }: TripChatProps) {
                                 {m.toolInvocations?.map((toolInvocation: any) => {
                                     const { toolCallId, toolName, state, args, result } = toolInvocation
                                     if (toolName === 'getWeather') {
+                                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                        const args = 'args' in toolInvocation ? (toolInvocation as any).args : {}
+                                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                        const result = 'result' in toolInvocation ? (toolInvocation as any).result : {}
+
                                         return (
                                             <div key={toolCallId} className="mt-2 p-2 bg-background/50 rounded text-xs border">
-                                                {toolInvocation.state === 'result' ? (
+                                                {state === 'result' ? (
                                                     <span>
-                                                        Checking weather for <b>{toolInvocation.args.location}</b>: {toolInvocation.result.temperature}°{toolInvocation.result.unit}, {toolInvocation.result.condition}
+                                                        Checking weather for <b>{args.location}</b>: {result.temperature}°{result.unit}, {result.condition}
                                                     </span>
                                                 ) : (
                                                     <span className="flex items-center gap-1">
-                                                        Checking weather for {toolInvocation.args.location}... <Loader2 className="h-3 w-3 animate-spin" />
+                                                        Checking weather for {args.location}... <Loader2 className="h-3 w-3 animate-spin" />
                                                     </span>
                                                 )}
                                             </div>

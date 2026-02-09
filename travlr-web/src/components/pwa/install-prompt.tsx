@@ -17,7 +17,8 @@ export function InstallPrompt() {
     useEffect(() => {
         // Check if already installed
         if (window.matchMedia('(display-mode: standalone)').matches) {
-            setIsInstalled(true)
+            // Defer state update to avoid warning about calling setState synchronously in effect
+            setTimeout(() => setIsInstalled(true), 0)
             return
         }
 
@@ -27,7 +28,7 @@ export function InstallPrompt() {
             const dismissedTime = parseInt(wasDismissed)
             // Don't show for 7 days after dismissal
             if (Date.now() - dismissedTime < 7 * 24 * 60 * 60 * 1000) {
-                setDismissed(true)
+                setTimeout(() => setDismissed(true), 0)
             }
         }
 

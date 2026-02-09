@@ -1,17 +1,18 @@
 // Export service for generating CSV and other export formats
+import { Trip } from "@/lib/types/trip"
 
 export interface ExportColumn {
     key: string
     header: string
-    formatter?: (value: any) => string
+    formatter?: (value: unknown) => string
 }
 
 // Generate CSV content from data
-export function generateCSV<T extends Record<string, any>>(
+export function generateCSV<T extends Record<string, unknown>>(
     data: T[],
     columns: ExportColumn[]
 ): string {
-    const escapeCSV = (value: any): string => {
+    const escapeCSV = (value: unknown): string => {
         if (value === null || value === undefined) return ''
         const str = String(value)
         if (str.includes(',') || str.includes('"') || str.includes('\n')) {
@@ -52,7 +53,7 @@ export function downloadCSV(content: string, filename: string) {
 }
 
 // Download JSON file
-export function downloadJSON(data: any, filename: string) {
+export function downloadJSON(data: unknown, filename: string) {
     const content = JSON.stringify(data, null, 2)
     const blob = new Blob([content], { type: 'application/json;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
@@ -67,8 +68,9 @@ export function downloadJSON(data: any, filename: string) {
 }
 
 // Format date for export
-export function formatDateForExport(date: Date | string): string {
-    const d = new Date(date)
+export function formatDateForExport(date: unknown): string {
+    if (!date) return ''
+    const d = new Date(date as string | Date | number)
     return d.toISOString().split('T')[0]
 }
 
@@ -81,23 +83,8 @@ export function formatCurrencyForExport(amount: number, currency: string): strin
 }
 
 // Export itinerary to CSV
-export function exportItineraryToCSV(trip: {
-    tripName: string
-    destination?: string
-    startDate?: string | Date
-    endDate?: string | Date
-    days?: Array<{
-        day: number
-        theme?: string
-        activities: Array<{
-            name: string
-            time?: string
-            description?: string
-            location?: string
-        }>
-    }>
-}) {
-    const rows: any[] = []
+export function exportItineraryToCSV(trip: Partial<Trip>) {
+    const rows: Record<string, unknown>[] = []
 
     trip.days?.forEach(day => {
         day.activities.forEach(activity => {
@@ -122,7 +109,8 @@ export function exportItineraryToCSV(trip: {
     ]
 
     const csv = generateCSV(rows, columns)
-    const filename = `${trip.tripName.replace(/\s+/g, '-').toLowerCase()}-itinerary`
+    const tripName = trip.tripName || 'trip'
+    const filename = `${tripName.replace(/\s+/g, '-').toLowerCase()}-itinerary`
     downloadCSV(csv, filename)
 }
 
@@ -173,29 +161,14 @@ export function exportPackingListToCSV(
 }
 
 // Export full trip as JSON (for backup/import)
-export function exportTripAsJSON(trip: any) {
+export function exportTripAsJSON(trip: Partial<Trip>) {
     const filename = `${trip.tripName?.replace(/\s+/g, '-').toLowerCase() || 'trip'}-backup`
     downloadJSON(trip, filename)
 }
 
 // Generate markdown export
-export function exportItineraryToMarkdown(trip: {
-    tripName: string
-    destination?: string
-    startDate?: string | Date
-    endDate?: string | Date
-    days?: Array<{
-        day: number
-        theme?: string
-        activities: Array<{
-            name: string
-            time?: string
-            description?: string
-            location?: string
-        }>
-    }>
-}): string {
-    let md = `# ${trip.tripName}\n\n`
+export function exportItineraryToMarkdown(trip: Partial<Trip>): string {
+    let md = `# ${trip.tripName || 'Trip'}\n\n`
 
     if (trip.destination) {
         md += `📍 **Destination:** ${trip.destination}\n\n`
@@ -244,7 +217,7 @@ export function downloadMarkdown(content: string, filename: string) {
     URL.revokeObjectURL(url)
 }
 
-export function exportItineraryAsMarkdown(trip: any) {
+export function exportItineraryAsMarkdown(trip: Partial<Trip>) {
     const md = exportItineraryToMarkdown(trip)
     const filename = `${trip.tripName?.replace(/\s+/g, '-').toLowerCase() || 'trip'}-itinerary`
     downloadMarkdown(md, filename)

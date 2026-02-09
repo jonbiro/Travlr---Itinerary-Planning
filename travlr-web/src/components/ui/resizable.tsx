@@ -9,7 +9,7 @@ const ResizablePanelGroup = ({
   className,
   ...props
 }: React.ComponentProps<typeof ResizablePrimitive.Group> & { direction: "vertical" | "horizontal" }) => (
-  // @ts-ignore - version mismatch hack
+
   <ResizablePrimitive.Group
     className={cn(
       "flex h-full w-full data-[panel-group-direction=vertical]:flex-col",

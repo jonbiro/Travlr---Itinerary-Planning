@@ -1,10 +1,11 @@
 "use client"
 
+import Image from "next/image"
 import { useState, useEffect, useRef } from "react"
 import {
     Camera,
     FileText,
-    Image,
+    Image as ImageIcon,
     Video,
     Plus,
     Trash2,
@@ -47,7 +48,7 @@ interface MemoryKeeperProps {
 }
 
 const typeIcons = {
-    photo: Image,
+    photo: ImageIcon,
     video: Video,
     note: FileText,
     document: FileText,
@@ -386,11 +387,14 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                             </DialogHeader>
                             <div className="space-y-4">
                                 {selectedMemory.type === "photo" && selectedMemory.fileUrl && (
-                                    <img
-                                        src={selectedMemory.fileUrl}
-                                        alt={selectedMemory.title}
-                                        className="w-full rounded-lg"
-                                    />
+                                    <div className="relative w-full aspect-video">
+                                        <Image
+                                            src={selectedMemory.fileUrl}
+                                            alt={selectedMemory.title}
+                                            fill
+                                            className="object-cover rounded-lg"
+                                        />
+                                    </div>
                                 )}
                                 {selectedMemory.type === "video" && selectedMemory.fileUrl && (
                                     <video
