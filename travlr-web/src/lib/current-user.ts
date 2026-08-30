@@ -66,8 +66,16 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
 }
 
 export function unauthorizedResponse() {
+    const authConfigured = isAuthConfigured()
+
     return Response.json(
-        { error: "Authentication required. Sign in to use Travlr." },
+        {
+            error: authConfigured
+                ? "Authentication required. Sign in to use Travlr."
+                : "Sign-in is not configured for this environment yet.",
+            code: authConfigured ? "AUTH_REQUIRED" : "AUTH_NOT_CONFIGURED",
+            authConfigured,
+        },
         { status: 401 },
     )
 }

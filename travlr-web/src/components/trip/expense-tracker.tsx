@@ -1,8 +1,23 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Plus, Loader2, Trash2, DollarSign, PieChart, TrendingUp } from "lucide-react"
-import { format } from "date-fns"
+import Link from "next/link"
+import {
+    Plus,
+    Loader2,
+    Trash2,
+    DollarSign,
+    PieChart,
+    TrendingUp,
+    Utensils,
+    Car,
+    Hotel,
+    Ticket,
+    ShoppingBag,
+    ReceiptText,
+    RefreshCw,
+    type LucideIcon,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -29,51 +44,134 @@ import { cn } from "@/lib/utils"
 import type { Expense, ExpenseCategory } from "@/lib/types/expense"
 import { EXPENSE_CATEGORIES, getCategoryInfo, calculateExpenseSummary } from "@/lib/types/expense"
 
+const categoryIcons: Record<ExpenseCategory, LucideIcon> = {
+    food: Utensils,
+    transport: Car,
+    lodging: Hotel,
+    activities: Ticket,
+    shopping: ShoppingBag,
+    other: ReceiptText,
+}
+
+function CategoryIcon({ category, className }: { category: ExpenseCategory; className?: string }) {
+    const Icon = categoryIcons[category] ?? ReceiptText
+    return <Icon className={className} aria-hidden="true" />
+}
+
+function formatDateOnly(value: Date | string): string {
+    const source = typeof value === "string" ? value : value.toISOString()
+    const dateOnly = source.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
+    const date = new Date(dateOnly ? `${dateOnly}T00:00:00.000Z` : source)
+    if (Number.isNaN(date.getTime())) return "Date unavailable"
+
+    return new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        timeZone: "UTC",
+    }).format(date)
+}
+
+function todayAsDateInput(): string {
+    const now = new Date()
+    return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
+}
+
 interface ExpenseTrackerProps {
     tripId?: string
     budget?: number
     currency?: string
 }
 
+type AuthState = "auth" | "setup"
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function classifyAuthFailure(payload: unknown): AuthState {
+    const record = isRecord(payload) ? payload : null
+    return record?.code === "AUTH_NOT_CONFIGURED" || record?.authConfigured === false
+        ? "setup"
+        : "auth"
+}
+
 export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: ExpenseTrackerProps) {
     const [expenses, setExpenses] = useState<Expense[]>([])
     const [isLoading, setIsLoading] = useState(false)
     const [isAddingExpense, setIsAddingExpense] = useState(false)
+    const [deletingExpenseId, setDeletingExpenseId] = useState<string | null>(null)
     const [dialogOpen, setDialogOpen] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [authState, setAuthState] = useState<AuthState | null>(null)
+    const [retryToken, setRetryToken] = useState(0)
 
     // Form state
     const [amount, setAmount] = useState("")
     const [category, setCategory] = useState<ExpenseCategory>("food")
     const [description, setDescription] = useState("")
-    const [date, setDate] = useState(format(new Date(), "yyyy-MM-dd"))
+    const [date, setDate] = useState(todayAsDateInput)
 
     // Load expenses
     useEffect(() => {
-        if (!tripId) return
+        if (!tripId) {
+            setExpenses([])
+            setIsLoading(false)
+            setError(null)
+            setAuthState(null)
+            return
+        }
+
+        const requestedTripId = tripId
+        const controller = new AbortController()
 
         async function loadExpenses() {
             setIsLoading(true)
             setError(null)
+            setAuthState(null)
             try {
-                const res = await fetch(`/api/trip/expenses?tripId=${tripId}`)
-                const data = await res.json().catch(() => null)
-                if (!res.ok) throw new Error(data?.error || "Unable to load expenses")
-                setExpenses(data.expenses || [])
+                const res = await fetch(`/api/trip/expenses?tripId=${encodeURIComponent(requestedTripId)}`, {
+                    signal: controller.signal,
+                })
+                const data: unknown = await res.json().catch(() => null)
+                if (res.status === 401) {
+                    const nextAuthState = classifyAuthFailure(data)
+                    setAuthState(nextAuthState)
+                    throw new Error(nextAuthState === "setup"
+                        ? "Sign-in is not configured for this environment yet."
+                        : "Sign in to view and manage shared expenses.")
+                }
+                if (!res.ok) {
+                    const message = typeof data === "object" && data !== null && "error" in data && typeof data.error === "string"
+                        ? data.error
+                        : "Unable to load expenses"
+                    throw new Error(message)
+                }
+                const expenses = typeof data === "object" && data !== null && "expenses" in data && Array.isArray(data.expenses)
+                    ? data.expenses as Expense[]
+                    : []
+                setExpenses(expenses)
             } catch (loadError) {
+                if (controller.signal.aborted) return
                 setError(loadError instanceof Error ? loadError.message : "Unable to load expenses")
             } finally {
-                setIsLoading(false)
+                if (!controller.signal.aborted) setIsLoading(false)
             }
         }
 
-        loadExpenses()
-    }, [tripId])
+        void loadExpenses()
+
+        return () => controller.abort()
+    }, [tripId, retryToken])
 
     const summary = calculateExpenseSummary(expenses, budget || null)
 
     async function handleAddExpense() {
-        if (!tripId || !amount) return
+        const numericAmount = Number(amount)
+        if (!tripId || !amount || !Number.isFinite(numericAmount) || numericAmount < 0) {
+            setError("Enter a valid non-negative amount.")
+            return
+        }
 
         setIsAddingExpense(true)
         setError(null)
@@ -83,21 +181,34 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     tripId,
-                    amount: parseFloat(amount),
+                    amount: numericAmount,
                     currency,
                     category,
                     description: description || null,
-                    date: new Date(date).toISOString(),
+                    date: new Date(`${date}T00:00:00.000Z`).toISOString(),
                 }),
             })
 
-            const payload = await res.json().catch(() => null)
-            if (!res.ok) throw new Error(payload?.error || "Unable to add expense")
+            const payload: unknown = await res.json().catch(() => null)
+            if (res.status === 401) {
+                const nextAuthState = classifyAuthFailure(payload)
+                setAuthState(nextAuthState)
+                throw new Error(nextAuthState === "setup"
+                    ? "Sign-in is not configured for this environment yet."
+                    : "Sign in to add shared expenses.")
+            }
+            if (!res.ok) {
+                const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
+                    ? payload.error
+                    : "Unable to add expense"
+                throw new Error(message)
+            }
 
-            setExpenses([payload, ...expenses])
+            setExpenses((previousExpenses) => [payload as Expense, ...previousExpenses])
             setAmount("")
             setDescription("")
             setCategory("food")
+            setDate(todayAsDateInput())
             setDialogOpen(false)
         } catch (addError) {
             setError(addError instanceof Error ? addError.message : "Unable to add expense")
@@ -107,17 +218,32 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
     }
 
     async function handleDeleteExpense(expenseId: string) {
+        setDeletingExpenseId(expenseId)
         setError(null)
         try {
             const res = await fetch(`/api/trip/expenses?id=${expenseId}`, {
                 method: "DELETE",
             })
 
-            const payload = await res.json().catch(() => null)
-            if (!res.ok) throw new Error(payload?.error || "Unable to delete expense")
-            setExpenses(expenses.filter(e => e.id !== expenseId))
+            const payload: unknown = await res.json().catch(() => null)
+            if (res.status === 401) {
+                const nextAuthState = classifyAuthFailure(payload)
+                setAuthState(nextAuthState)
+                throw new Error(nextAuthState === "setup"
+                    ? "Sign-in is not configured for this environment yet."
+                    : "Sign in to manage shared expenses.")
+            }
+            if (!res.ok) {
+                const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
+                    ? payload.error
+                    : "Unable to delete expense"
+                throw new Error(message)
+            }
+            setExpenses((previousExpenses) => previousExpenses.filter((expense) => expense.id !== expenseId))
         } catch (deleteError) {
             setError(deleteError instanceof Error ? deleteError.message : "Unable to delete expense")
+        } finally {
+            setDeletingExpenseId(null)
         }
     }
 
@@ -126,6 +252,34 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
             <div className="flex flex-col items-center justify-center p-8 text-center space-y-4 h-full">
                 <DollarSign className="h-12 w-12 text-muted-foreground opacity-50" />
                 <p className="text-muted-foreground">Create or select a trip to track expenses</p>
+            </div>
+        )
+    }
+
+    if (authState) {
+        const isSetup = authState === "setup"
+
+        return (
+            <div className="flex h-full flex-col items-center justify-center space-y-4 p-8 text-center" role="alert">
+                <DollarSign className="h-10 w-10 text-muted-foreground" aria-hidden="true" />
+                <div>
+                    <h3 className="font-semibold text-lg">{isSetup ? "Finish setting up Travlr" : "Sign in to manage shared expenses"}</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        {isSetup
+                            ? "Sign-in is not configured for this environment yet. Add the required authentication settings, then try again."
+                            : "Trip members can record and review shared spending after signing in."}
+                    </p>
+                </div>
+                {isSetup ? (
+                    <Button type="button" variant="outline" onClick={() => setRetryToken((token) => token + 1)}>
+                        <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                        Try again
+                    </Button>
+                ) : (
+                    <Button asChild>
+                        <Link href="/api/auth/signin">Sign in</Link>
+                    </Button>
+                )}
             </div>
         )
     }
@@ -156,8 +310,8 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
                         <CardTitle className="text-lg">Budget Overview</CardTitle>
                         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                             <DialogTrigger asChild>
-                                <Button size="sm">
-                                    <Plus className="h-4 w-4 mr-1" /> Add
+                                <Button type="button" size="sm">
+                                    <Plus className="h-4 w-4 mr-1" aria-hidden="true" /> Add expense
                                 </Button>
                             </DialogTrigger>
                             <DialogContent>
@@ -189,7 +343,7 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
                                                 {EXPENSE_CATEGORIES.map((cat) => (
                                                     <SelectItem key={cat.value} value={cat.value}>
                                                         <span className="flex items-center gap-2">
-                                                            <span>{cat.icon}</span>
+                                                        <CategoryIcon category={cat.value} className="h-4 w-4" />
                                                             <span>{cat.label}</span>
                                                         </span>
                                                     </SelectItem>
@@ -277,7 +431,7 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
                             {EXPENSE_CATEGORIES.filter(cat => summary.byCategory[cat.value] > 0).map((cat) => (
                                 <div key={cat.value} className="flex items-center justify-between bg-muted/50 rounded p-2">
                                     <span className="flex items-center gap-1">
-                                        <span>{cat.icon}</span>
+                                        <CategoryIcon category={cat.value} className="h-4 w-4" />
                                         <span className="text-xs">{cat.label}</span>
                                     </span>
                                     <span className="font-medium text-xs">{currency} {summary.byCategory[cat.value].toFixed(0)}</span>
@@ -308,13 +462,13 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
                                         className="flex items-center justify-between p-3 bg-card border rounded-lg group"
                                     >
                                         <div className="flex items-center gap-3">
-                                            <span className="text-lg">{catInfo.icon}</span>
+                                            <CategoryIcon category={expense.category} className="h-5 w-5 text-muted-foreground" />
                                             <div>
                                                 <p className="font-medium text-sm">
                                                     {expense.description || catInfo.label}
                                                 </p>
                                                 <p className="text-xs text-muted-foreground">
-                                                    {format(new Date(expense.date), "MMM d, yyyy")}
+                                                    {formatDateOnly(expense.date)}
                                                 </p>
                                             </div>
                                         </div>
@@ -325,10 +479,16 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
                                             <Button
                                                 variant="ghost"
                                                 size="icon"
-                                                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
                                                 onClick={() => handleDeleteExpense(expense.id)}
+                                                disabled={deletingExpenseId !== null}
+                                                aria-label={`Delete ${expense.description || catInfo.label} expense`}
                                             >
-                                                <Trash2 className="h-4 w-4 text-destructive" />
+                                                {deletingExpenseId === expense.id ? (
+                                                    <Loader2 className="h-4 w-4 animate-spin text-destructive" aria-hidden="true" />
+                                                ) : (
+                                                    <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
+                                                )}
                                             </Button>
                                         </div>
                                     </div>

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { Palette, Image as ImageIcon, Check, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -18,6 +19,19 @@ import { cn } from "@/lib/utils"
 import type { TripTheme } from "@/lib/types/trip"
 
 export type { TripTheme } from "@/lib/types/trip"
+
+type AuthState = "auth" | "setup"
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function classifyAuthFailure(payload: unknown): AuthState {
+    const record = isRecord(payload) ? payload : null
+    return record?.code === "AUTH_NOT_CONFIGURED" || record?.authConfigured === false
+        ? "setup"
+        : "auth"
+}
 
 interface TripCustomizationDialogProps {
     tripId?: string
@@ -101,17 +115,36 @@ export function TripCustomizationDialog({
     const [selectedTheme, setSelectedTheme] = useState<TripTheme>(
         currentTheme || presetThemes[0].theme
     )
-    const [customColor, setCustomColor] = useState("#3b82f6")
+    const [customColor, setCustomColor] = useState(currentTheme?.backgroundColor || "#3b82f6")
     const [customImageUrl, setCustomImageUrl] = useState("")
     const [isSaving, setIsSaving] = useState(false)
     const [saveError, setSaveError] = useState<string | null>(null)
+    const [authState, setAuthState] = useState<AuthState | null>(null)
     const [open, setOpen] = useState(false)
 
+    const resetDraft = () => {
+        const nextTheme = currentTheme || presetThemes[0].theme
+        setSelectedTheme({ ...nextTheme })
+        setCustomColor(nextTheme.backgroundColor || "#3b82f6")
+        setCustomImageUrl("")
+        setSaveError(null)
+        setAuthState(null)
+    }
+
+    const handleOpenChange = (nextOpen: boolean) => {
+        if (isSaving) return
+
+        resetDraft()
+        setOpen(nextOpen)
+    }
+
     const handleSelectPresetTheme = (theme: TripTheme) => {
-        setSelectedTheme(theme)
+        setSaveError(null)
+        setSelectedTheme({ ...theme })
     }
 
     const handleSelectImage = (url: string) => {
+        setSaveError(null)
         setSelectedTheme({
             ...selectedTheme,
             backgroundImage: url,
@@ -119,6 +152,12 @@ export function TripCustomizationDialog({
     }
 
     const handleCustomColor = () => {
+        if (!isValidHexColor(customColor)) {
+            setSaveError("Use a six-digit hex color, such as #3b82f6.")
+            return
+        }
+
+        setSaveError(null)
         setSelectedTheme({
             backgroundColor: customColor,
             accentColor: customColor,
@@ -129,6 +168,7 @@ export function TripCustomizationDialog({
 
     const handleCustomImage = () => {
         if (customImageUrl) {
+            setSaveError(null)
             setSelectedTheme({
                 ...selectedTheme,
                 backgroundImage: customImageUrl,
@@ -144,16 +184,24 @@ export function TripCustomizationDialog({
 
         setIsSaving(true)
         setSaveError(null)
+        setAuthState(null)
         try {
             const response = await fetch(`/api/trip/${encodeURIComponent(tripId)}/theme`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(selectedTheme),
             })
-            const payload = await response.json().catch(() => null) as { error?: unknown } | null
+            const payload: unknown = await response.json().catch(() => null)
+            if (response.status === 401) {
+                const nextAuthState = classifyAuthFailure(payload)
+                setAuthState(nextAuthState)
+                throw new Error(nextAuthState === "setup"
+                    ? "Sign-in is not configured for this environment yet."
+                    : "Sign in to customize this trip.")
+            }
             if (!response.ok) {
                 throw new Error(
-                    typeof payload?.error === "string"
+                    isRecord(payload) && typeof payload.error === "string"
                         ? payload.error
                         : "Unable to save the trip appearance.",
                 )
@@ -169,9 +217,9 @@ export function TripCustomizationDialog({
     }
 
     return (
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2" disabled={!tripId}>
+                <Button type="button" variant="outline" size="sm" className="gap-2" disabled={!tripId}>
                     <Palette className="h-4 w-4" />
                     Customize
                 </Button>
@@ -216,6 +264,7 @@ export function TripCustomizationDialog({
                                 {presetThemes.map((preset) => (
                                     <button
                                         key={preset.name}
+                                        type="button"
                                         onClick={() => handleSelectPresetTheme(preset.theme)}
                                         className={cn(
                                             "w-full aspect-square rounded-lg border-2 transition-all",
@@ -227,6 +276,8 @@ export function TripCustomizationDialog({
                                             background: `linear-gradient(135deg, ${preset.theme.gradientFrom}, ${preset.theme.gradientTo})`,
                                         }}
                                         title={preset.name}
+                                        aria-label={`Use ${preset.name} theme`}
+                                        aria-pressed={selectedTheme.backgroundColor === preset.theme.backgroundColor}
                                     >
                                         {selectedTheme.backgroundColor === preset.theme.backgroundColor && (
                                             <Check className="h-4 w-4 text-white mx-auto" />
@@ -253,7 +304,7 @@ export function TripCustomizationDialog({
                                     placeholder="#3b82f6"
                                     className="flex-1"
                                 />
-                                <Button variant="secondary" onClick={handleCustomColor}>
+                                <Button type="button" variant="secondary" onClick={handleCustomColor}>
                                     Apply
                                 </Button>
                             </div>
@@ -282,6 +333,7 @@ export function TripCustomizationDialog({
                                 {presetImages.map((img) => (
                                     <button
                                         key={img.name}
+                                        type="button"
                                         onClick={() => handleSelectImage(img.url)}
                                         className={cn(
                                             "aspect-video rounded-lg bg-cover bg-center border-2 transition-all relative overflow-hidden",
@@ -291,6 +343,8 @@ export function TripCustomizationDialog({
                                         )}
                                         style={{ backgroundImage: `url(${img.url})` }}
                                         title={img.name}
+                                        aria-label={`Use ${img.name} background`}
+                                        aria-pressed={selectedTheme.backgroundImage === img.url}
                                     >
                                         {selectedTheme.backgroundImage === img.url && (
                                             <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
@@ -313,7 +367,7 @@ export function TripCustomizationDialog({
                                     placeholder="https://example.com/image.jpg"
                                     className="flex-1"
                                 />
-                                <Button variant="secondary" onClick={handleCustomImage}>
+                                <Button type="button" variant="secondary" onClick={handleCustomImage}>
                                     Apply
                                 </Button>
                             </div>
@@ -322,11 +376,13 @@ export function TripCustomizationDialog({
                         {/* Clear Image */}
                         {selectedTheme.backgroundImage && (
                             <Button
+                                type="button"
                                 variant="outline"
                                 className="w-full"
-                                onClick={() =>
+                                onClick={() => {
+                                    setSaveError(null)
                                     setSelectedTheme({ ...selectedTheme, backgroundImage: undefined })
-                                }
+                                }}
                             >
                                 Remove Background Image
                             </Button>
@@ -335,15 +391,31 @@ export function TripCustomizationDialog({
                 </Tabs>
 
                 <div className="flex items-center justify-end gap-2 mt-4">
-                    {saveError && (
+                    {authState ? (
+                        <div className="mr-auto text-sm" role="alert">
+                            <p className="font-medium">
+                                {authState === "setup" ? "Finish setting up Travlr" : "Sign in to customize this trip"}
+                            </p>
+                            <p className="mt-1 text-muted-foreground">
+                                {authState === "setup"
+                                    ? "Sign-in is not configured for this environment yet. Add the required authentication settings, then try again."
+                                    : "Sign in before saving this trip's appearance."}
+                            </p>
+                            {authState === "auth" && (
+                                <Button asChild type="button" variant="link" size="sm" className="mt-1 h-auto px-0">
+                                    <Link href="/api/auth/signin">Sign in</Link>
+                                </Button>
+                            )}
+                        </div>
+                    ) : saveError ? (
                         <p role="alert" className="mr-auto text-sm text-destructive">
                             {saveError}
                         </p>
-                    )}
-                    <Button variant="outline" onClick={() => setOpen(false)}>
+                    ) : null}
+                    <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
                         Cancel
                     </Button>
-                    <Button onClick={handleSave} disabled={isSaving || !tripId}>
+                    <Button type="button" onClick={handleSave} disabled={isSaving || !tripId}>
                         {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                         Save Theme
                     </Button>
@@ -361,4 +433,8 @@ function adjustColor(hex: string, percent: number): string {
     const G = Math.max(0, Math.min(255, ((num >> 8) & 0x00ff) + amt))
     const B = Math.max(0, Math.min(255, (num & 0x0000ff) + amt))
     return `#${((1 << 24) + (R << 16) + (G << 8) + B).toString(16).slice(1)}`
+}
+
+function isValidHexColor(value: string): boolean {
+    return /^#[0-9a-f]{6}$/i.test(value)
 }

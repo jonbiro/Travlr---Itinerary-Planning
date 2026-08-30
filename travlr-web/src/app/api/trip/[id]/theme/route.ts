@@ -5,6 +5,7 @@ import { getCurrentUser, unauthorizedResponse } from "@/lib/current-user"
 import { ensureDemoUser, getPrismaClient } from "@/lib/prisma"
 import { tripThemeSchema } from "@/lib/validators/trip-theme"
 import { JSON_BODY_LIMITS, jsonBodyErrorResponse, readJsonBody } from "@/lib/request-json"
+import { consumeRateLimitAsync, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit"
 
 function databaseUnavailable() {
     return NextResponse.json(
@@ -22,6 +23,13 @@ export async function PUT(
 
     const prisma = getPrismaClient()
     if (!prisma) return databaseUnavailable()
+
+    const mutationLimit = await consumeRateLimitAsync(
+        `mutation:${currentUser.id}`,
+        RATE_LIMITS.mutation,
+        prisma,
+    )
+    if (!mutationLimit.allowed) return rateLimitResponse(mutationLimit)
 
     const json = await readJsonBody(req, JSON_BODY_LIMITS.tripTheme)
     if (!json.ok) return jsonBodyErrorResponse(json)

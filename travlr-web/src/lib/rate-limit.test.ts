@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
     clearRateLimitStore,
     consumeRateLimit,
+    consumeRateLimitAsync,
     rateLimitResponse,
 } from "./rate-limit"
 
@@ -68,5 +69,45 @@ describe("consumeRateLimit", () => {
             code: "RATE_LIMITED",
             retryAfterSeconds: 30,
         })
+    })
+
+    it("uses an atomic durable bucket when a Prisma client is available", async () => {
+        const queryRaw = vi.fn().mockResolvedValue([{
+            count: 2,
+            limit: 2,
+            resetAt: new Date("2026-08-30T12:01:00.000Z"),
+            windowMs: 60_000,
+        }])
+
+        const result = await consumeRateLimitAsync(
+            "chat:user-1",
+            { limit: 2, windowMs: 60_000 },
+            { $queryRaw: queryRaw } as never,
+        )
+
+        expect(result).toMatchObject({
+            allowed: true,
+            remaining: 0,
+            resetAt: new Date("2026-08-30T12:01:00.000Z").getTime(),
+        })
+        expect(queryRaw).toHaveBeenCalledTimes(1)
+    })
+
+    it("falls back to bounded local state if the durable bucket is unavailable", async () => {
+        const queryRaw = vi.fn().mockRejectedValue(new Error("database unavailable"))
+
+        const first = await consumeRateLimitAsync(
+            "chat:user-1",
+            { limit: 1, windowMs: 60_000 },
+            { $queryRaw: queryRaw } as never,
+        )
+        const second = await consumeRateLimitAsync(
+            "chat:user-1",
+            { limit: 1, windowMs: 60_000 },
+            { $queryRaw: queryRaw } as never,
+        )
+
+        expect(first.allowed).toBe(true)
+        expect(second.allowed).toBe(false)
     })
 })

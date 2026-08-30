@@ -1,8 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { ArrowRight, CalendarDays, MapPin, Plus, RefreshCw } from "lucide-react"
+import { ArrowRight, CalendarDays, Database, LogIn, MapPin, Plus, RefreshCw, ShieldCheck } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -16,6 +16,11 @@ type TripSummary = {
     budget: string | number | null
     currency: string
     dayCount: number
+}
+
+type TripsLoadError = {
+    kind: "auth" | "setup" | "generic"
+    message: string
 }
 
 function asString(value: unknown): string | null {
@@ -55,6 +60,7 @@ function formatDate(value: string | null): string | null {
         month: "short",
         day: "numeric",
         year: "numeric",
+        timeZone: "UTC",
     }).format(date)
 }
 
@@ -71,32 +77,135 @@ function formatBudget(trip: TripSummary): string | null {
     return `${trip.currency} ${trip.budget}`
 }
 
+function responseRecord(value: unknown): Record<string, unknown> | null {
+    return value !== null && typeof value === "object" && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : null
+}
+
+function classifyLoadError(response: Response, payload: unknown): TripsLoadError {
+    const record = responseRecord(payload)
+    const code = typeof record?.code === "string" ? record.code : ""
+    const message = typeof record?.error === "string" && record.error.trim()
+        ? record.error
+        : "We couldn’t load your trips right now."
+
+    if (
+        response.status === 503
+        || code === "DATABASE_NOT_CONFIGURED"
+        || message.toLowerCase().includes("database is not configured")
+    ) {
+        return {
+            kind: "setup",
+            message: "Connect a database to load and save trips in this environment.",
+        }
+    }
+
+    if (
+        response.status === 401
+        || code === "AUTH_REQUIRED"
+        || code === "AUTH_NOT_CONFIGURED"
+        || record?.authConfigured === false
+    ) {
+        return {
+            kind: code === "AUTH_NOT_CONFIGURED" || record?.authConfigured === false ? "setup" : "auth",
+            message: code === "AUTH_NOT_CONFIGURED" || record?.authConfigured === false
+                ? "Sign-in is not configured for this environment yet."
+                : "Sign in to view your private trip library.",
+        }
+    }
+
+    return { kind: "generic", message }
+}
+
+function AccessState({ error, onRetry }: { error: TripsLoadError; onRetry: () => void }) {
+    const isAuth = error.kind === "auth"
+    const isSetup = error.kind === "setup"
+
+    return (
+        <div className="mx-auto flex min-h-64 max-w-xl flex-col items-center justify-center rounded-xl border border-dashed p-8 text-center" role="alert">
+            <div className="rounded-full bg-primary/10 p-3 text-primary">
+                {isAuth ? <ShieldCheck className="h-6 w-6" /> : <Database className="h-6 w-6" />}
+            </div>
+            <h2 className="mt-4 text-lg font-semibold">
+                {isAuth ? "Sign in to see your trips" : isSetup ? "Travlr needs a little setup" : "Trips are temporarily unavailable"}
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">{error.message}</p>
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+                {isAuth && (
+                    <Button asChild>
+                        <Link href="/api/auth/signin?callbackUrl=%2Ftrips">
+                            <LogIn className="h-4 w-4" />
+                            Sign in
+                        </Link>
+                    </Button>
+                )}
+                <Button type="button" variant={isAuth ? "outline" : "default"} onClick={onRetry}>
+                    <RefreshCw className="h-4 w-4" />
+                    Try again
+                </Button>
+                {isAuth && (
+                    <Button asChild type="button" variant="ghost">
+                        <Link href="/">Back home</Link>
+                    </Button>
+                )}
+            </div>
+        </div>
+    )
+}
+
 export default function TripsPage() {
     const [trips, setTrips] = useState<TripSummary[]>([])
     const [isLoading, setIsLoading] = useState(true)
-    const [error, setError] = useState<string | null>(null)
+    const [error, setError] = useState<TripsLoadError | null>(null)
+    const requestRef = useRef<AbortController | null>(null)
 
     const loadTrips = useCallback(async () => {
+        requestRef.current?.abort()
+        const controller = new AbortController()
+        requestRef.current = controller
         setIsLoading(true)
         setError(null)
 
         try {
-            const response = await fetch("/api/trips")
-            if (!response.ok) throw new Error("We couldn’t load your trips right now.")
+            const response = await fetch("/api/trips", {
+                cache: "no-store",
+                signal: controller.signal,
+            })
+            const payload: unknown = await response.json().catch(() => null)
+            if (!response.ok) {
+                throw classifyLoadError(response, payload)
+            }
 
-            const payload: unknown = await response.json()
             if (!Array.isArray(payload)) throw new Error("We couldn’t read your trips right now.")
 
+            if (controller.signal.aborted) return
             setTrips(payload.map(normalizeTrip).filter((trip): trip is TripSummary => trip !== null))
         } catch (loadError) {
-            setError(loadError instanceof Error ? loadError.message : "We couldn’t load your trips right now.")
+            if (controller.signal.aborted || (loadError instanceof Error && loadError.name === "AbortError")) return
+
+            setError(
+                typeof loadError === "object" && loadError !== null && "kind" in loadError && "message" in loadError
+                    ? loadError as TripsLoadError
+                    : {
+                        kind: "generic",
+                        message: loadError instanceof Error ? loadError.message : "We couldn’t load your trips right now.",
+                    },
+            )
         } finally {
-            setIsLoading(false)
+            if (requestRef.current === controller) {
+                requestRef.current = null
+                setIsLoading(false)
+            }
         }
     }, [])
 
     useEffect(() => {
         void loadTrips()
+        return () => {
+            requestRef.current?.abort()
+            requestRef.current = null
+        }
     }, [loadTrips])
 
     return (
@@ -130,13 +239,7 @@ export default function TripsPage() {
                         Loading your trips…
                     </div>
                 ) : error ? (
-                    <div className="mx-auto flex min-h-64 max-w-xl flex-col items-center justify-center rounded-xl border border-dashed p-8 text-center">
-                        <h2 className="text-lg font-semibold">Trips are temporarily unavailable</h2>
-                        <p className="mt-2 text-sm text-muted-foreground">{error}</p>
-                        <Button type="button" variant="outline" className="mt-5" onClick={() => void loadTrips()}>
-                            Try again
-                        </Button>
-                    </div>
+                    <AccessState error={error} onRetry={() => void loadTrips()} />
                 ) : trips.length === 0 ? (
                     <div className="mx-auto flex min-h-64 max-w-xl flex-col items-center justify-center rounded-xl border border-dashed p-8 text-center">
                         <div className="rounded-full bg-primary/10 p-3 text-primary">

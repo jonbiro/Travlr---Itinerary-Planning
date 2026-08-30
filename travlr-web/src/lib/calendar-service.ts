@@ -1,4 +1,12 @@
-// Calendar service for generating iCal files and Google Calendar links
+// Calendar service for generating iCal files and calendar links.
+
+/**
+ * A calendar event's timed Date values are UTC-backed calendar components,
+ * rather than instants. The UTC components hold the destination's wall-clock
+ * date and time because the trip model does not include a destination IANA
+ * timezone. Serializers below therefore emit them as floating local times
+ * (without a `Z` suffix or a fabricated `TZID`).
+ */
 
 export interface CalendarEvent {
     title: string
@@ -9,15 +17,49 @@ export interface CalendarEvent {
     allDay?: boolean
 }
 
+const pad = (value: number, length: number) => String(value).padStart(length, '0')
+
+/**
+ * Format the UTC-backed calendar components as an iCalendar floating
+ * DATE-TIME. A DATE-TIME without `Z` or `TZID` is intentionally floating under
+ * RFC 5545: it represents the same wall-clock time regardless of the
+ * calendar's timezone.
+ */
+function formatFloatingICalDateTime(date: Date): string {
+    return [
+        pad(date.getUTCFullYear(), 4),
+        pad(date.getUTCMonth() + 1, 2),
+        pad(date.getUTCDate(), 2),
+    ].join('') + 'T' + [
+        pad(date.getUTCHours(), 2),
+        pad(date.getUTCMinutes(), 2),
+        pad(date.getUTCSeconds(), 2),
+    ].join('')
+}
+
+/** Format an actual instant for iCalendar's required UTC DTSTAMP value. */
+function formatUtcICalDateTime(date: Date): string {
+    return date.toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z'
+}
+
+/** Format floating local components as an offset-less ISO date-time. */
+function formatFloatingIsoDateTime(date: Date): string {
+    return [
+        [
+            pad(date.getUTCFullYear(), 4),
+            pad(date.getUTCMonth() + 1, 2),
+            pad(date.getUTCDate(), 2),
+        ].join('-'),
+        [
+            pad(date.getUTCHours(), 2),
+            pad(date.getUTCMinutes(), 2),
+            pad(date.getUTCSeconds(), 2),
+        ].join(':'),
+    ].join('T')
+}
+
 // Generate iCal (.ics) file content
 export function generateICalFile(events: CalendarEvent[], tripName: string): string {
-    const formatDate = (date: Date, allDay?: boolean): string => {
-        if (allDay) {
-            return date.toISOString().slice(0, 10).replace(/-/g, '')
-        }
-        return date.toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z'
-    }
-
     const escapeText = (text: string): string => {
         return text
             .replace(/\\/g, '\\\\')
@@ -31,6 +73,10 @@ export function generateICalFile(events: CalendarEvent[], tripName: string): str
         'VERSION:2.0',
         'PRODID:-//Travlr//Trip Planner//EN',
         `X-WR-CALNAME:${escapeText(tripName)}`,
+        // This extension documents why timed values intentionally omit Z and
+        // TZID. Consumers that do not understand it still receive valid RFC
+        // 5545 floating DATE-TIME values.
+        'X-TRAVLR-TIME-SEMANTICS:FLOATING-LOCAL',
     ]
 
     events.forEach((event, index) => {
@@ -38,14 +84,20 @@ export function generateICalFile(events: CalendarEvent[], tripName: string): str
 
         lines.push('BEGIN:VEVENT')
         lines.push(`UID:${uid}`)
-        lines.push(`DTSTAMP:${formatDate(new Date())}`)
+        lines.push(`DTSTAMP:${formatUtcICalDateTime(new Date())}`)
 
         if (event.allDay) {
-            lines.push(`DTSTART;VALUE=DATE:${formatDate(event.startDate, true)}`)
-            lines.push(`DTEND;VALUE=DATE:${formatDate(event.endDate, true)}`)
+            const formatDateOnly = (date: Date) => [
+                pad(date.getUTCFullYear(), 4),
+                pad(date.getUTCMonth() + 1, 2),
+                pad(date.getUTCDate(), 2),
+            ].join('')
+
+            lines.push(`DTSTART;VALUE=DATE:${formatDateOnly(event.startDate)}`)
+            lines.push(`DTEND;VALUE=DATE:${formatDateOnly(event.endDate)}`)
         } else {
-            lines.push(`DTSTART:${formatDate(event.startDate)}`)
-            lines.push(`DTEND:${formatDate(event.endDate)}`)
+            lines.push(`DTSTART:${formatFloatingICalDateTime(event.startDate)}`)
+            lines.push(`DTEND:${formatFloatingICalDateTime(event.endDate)}`)
         }
 
         lines.push(`SUMMARY:${escapeText(event.title)}`)
@@ -69,7 +121,10 @@ export function generateICalFile(events: CalendarEvent[], tripName: string): str
 // Generate Google Calendar URL for adding a single event
 export function generateGoogleCalendarUrl(event: CalendarEvent): string {
     const formatGoogleDate = (date: Date): string => {
-        return date.toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z'
+        // Google accepts an offset-less local date-time for template links.
+        // There is no destination IANA timezone to send as `ctz`, so do not
+        // turn the destination wall-clock time into a falsely UTC timestamp.
+        return formatFloatingICalDateTime(date)
     }
 
     const baseUrl = 'https://calendar.google.com/calendar/render'
@@ -93,7 +148,9 @@ export function generateGoogleCalendarUrl(event: CalendarEvent): string {
 // Generate Outlook Calendar URL
 export function generateOutlookCalendarUrl(event: CalendarEvent): string {
     const formatOutlookDate = (date: Date): string => {
-        return date.toISOString()
+        // An offset-less ISO date-time keeps this as a local wall-clock value.
+        // Supplying `Z` here would claim that the activity occurs in UTC.
+        return formatFloatingIsoDateTime(date)
     }
 
     const baseUrl = 'https://outlook.live.com/calendar/0/deeplink/compose'
@@ -136,11 +193,20 @@ export function tripToCalendarEvents(trip: {
 
     if (!trip.startDate || !trip.days) return events
 
-    const tripStartDate = new Date(trip.startDate)
+    const parsedTripStart = new Date(trip.startDate)
+    if (Number.isNaN(parsedTripStart.getTime())) return events
+
+    // Trip dates are date-only product values. Keep all calendar arithmetic
+    // in UTC so a midnight database value never rolls back a day west of UTC.
+    const tripStartDate = new Date(Date.UTC(
+        parsedTripStart.getUTCFullYear(),
+        parsedTripStart.getUTCMonth(),
+        parsedTripStart.getUTCDate(),
+    ))
 
     trip.days.forEach((day) => {
         const dayDate = new Date(tripStartDate)
-        dayDate.setDate(dayDate.getDate() + day.day - 1)
+        dayDate.setUTCDate(dayDate.getUTCDate() + day.day - 1)
 
         day.activities.forEach((activity) => {
             // Parse time (e.g., "9:00 AM")
@@ -161,10 +227,10 @@ export function tripToCalendarEvents(trip: {
             }
 
             const startDate = new Date(dayDate)
-            startDate.setHours(startHour, startMinute, 0, 0)
+            startDate.setUTCHours(startHour, startMinute, 0, 0)
 
             const endDate = new Date(startDate)
-            endDate.setMinutes(endDate.getMinutes() + (activity.duration || 60)) // Default 1 hour
+            endDate.setUTCMinutes(endDate.getUTCMinutes() + (activity.duration || 60)) // Default 1 hour
 
             events.push({
                 title: activity.name,

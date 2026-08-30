@@ -47,6 +47,9 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Lint
         run: npm run lint
 

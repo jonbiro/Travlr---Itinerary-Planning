@@ -3,7 +3,7 @@
     "name": "Travlr",
     "short_name": "Travlr",
     "description": "AI-powered travel planning and itinerary management",
-    "start_url": "/dashboard",
+    "start_url": "/",
     "scope": "/",
     "display": "standalone",
     "background_color": "#0a0a0a",

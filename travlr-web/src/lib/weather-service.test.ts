@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { getWeatherForecast, WeatherServiceError } from "./weather-service"
+import { clearWeatherCache, getWeatherForecast, WeatherServiceError } from "./weather-service"
 
 const fetchMock = vi.fn()
 
@@ -14,6 +14,7 @@ function providerResponse(body: unknown, status = 200) {
 
 beforeEach(() => {
     fetchMock.mockReset()
+    clearWeatherCache()
     vi.stubGlobal("fetch", fetchMock)
     vi.stubEnv("OPENWEATHERMAP_API_KEY", "test-key")
 })
@@ -62,6 +63,8 @@ describe("getWeatherForecast", () => {
         fetchMock
             .mockResolvedValueOnce(providerResponse([{ lat: 48.8566, lon: 2.3522 }]))
             .mockResolvedValueOnce(providerResponse({
+                timezone: "Europe/Paris",
+                timezone_offset: 3_600,
                 current: {
                     temp: 18.4,
                     humidity: 61,
@@ -80,6 +83,8 @@ describe("getWeatherForecast", () => {
 
         await expect(getWeatherForecast("Paris, France")).resolves.toMatchObject({
             location: "Paris, France",
+            timezone: "Europe/Paris",
+            timezoneOffset: 3_600,
             current: {
                 temp: 18,
                 condition: "sunny",
@@ -94,5 +99,34 @@ describe("getWeatherForecast", () => {
                 windSpeed: 18,
             }],
         })
+    })
+
+    it("serves a fresh cached forecast without another provider request", async () => {
+        fetchMock
+            .mockResolvedValueOnce(providerResponse([{ lat: 48.8566, lon: 2.3522 }]))
+            .mockResolvedValueOnce(providerResponse({
+                timezone: "Europe/Paris",
+                timezone_offset: 3_600,
+                current: {
+                    temp: 18.4,
+                    humidity: 61,
+                    wind_speed: 4,
+                    weather: [{ main: "Clear" }],
+                },
+                daily: [{
+                    dt: 1_700_000_000,
+                    temp: { max: 20.2, min: 12.1 },
+                    humidity: 58,
+                    wind_speed: 5,
+                    pop: 0.2,
+                    weather: [{ main: "Rain" }],
+                }],
+            }))
+
+        await getWeatherForecast("Paris, France")
+        const cached = await getWeatherForecast(" paris, france ")
+
+        expect(cached.location).toBe("Paris, France")
+        expect(fetchMock).toHaveBeenCalledTimes(2)
     })
 })

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
+import { toast } from "sonner"
 
 export function ServiceWorkerRegistration() {
     useEffect(() => {
@@ -21,11 +22,14 @@ export function ServiceWorkerRegistration() {
                         if (newWorker) {
                             newWorker.addEventListener('statechange', () => {
                                 if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                    // New version available
-                                    if (window.confirm('A new version is available. Refresh to update?')) {
-                                        newWorker.postMessage('skipWaiting')
-                                        window.location.reload()
-                                    }
+                                    toast("A Travlr update is ready", {
+                                        description: "Refresh when you are ready to use the latest version.",
+                                        duration: Infinity,
+                                        action: {
+                                            label: "Refresh",
+                                            onClick: () => newWorker.postMessage("skipWaiting"),
+                                        },
+                                    })
                                 }
                             })
                         }

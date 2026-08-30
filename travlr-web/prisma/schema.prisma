@@ -2,7 +2,7 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"
+  provider   = "prisma-client-js"
   engineType = "library"
 }
 
@@ -45,16 +45,19 @@ model User {
   email         String?   @unique
   emailVerified DateTime?
   image         String?
-  password      String?   // For credentials auth if needed
+  password      String? // For credentials auth if needed
   accounts      Account[]
   sessions      Session[]
-  
+
   // App specific
-  trips         Trip[]    @relation("TripOwner")
-  sharedTrips   TripUser[]
-  
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  trips       Trip[]     @relation("TripOwner")
+  sharedTrips TripUser[]
+
+  createdMemories Memory[]  @relation("MemoryCreator")
+  createdExpenses Expense[] @relation("ExpenseCreator")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model VerificationToken {
@@ -68,146 +71,179 @@ model VerificationToken {
 // App Models
 
 model Trip {
-  id          String   @id @default(cuid())
-  name        String?  // Made optional to support "New Trip" without immediate name, or default
-  tripName    String?  // Alias or specific name field if 'name' is used for internal ID
+  id          String    @id @default(cuid())
+  name        String? // Made optional to support "New Trip" without immediate name, or default
+  tripName    String? // Alias or specific name field if 'name' is used for internal ID
   destination String?
   startDate   DateTime?
   endDate     DateTime?
   imgUrl      String?
   theme       Json?
-  budget      Decimal?  // Total budget for the trip
+  budget      Decimal? // Total budget for the trip
   currency    String    @default("USD")
-  
-  userId      String
-  owner       User     @relation("TripOwner", fields: [userId], references: [id], onDelete: Cascade)
-  
-  members     TripUser[]
-  days        Day[]
-  cities      City[]
-  expenses    Expense[]
-  memories    Memory[]
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+
+  userId String
+  owner  User   @relation("TripOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  members  TripUser[]
+  days     Day[]
+  cities   City[]
+  expenses Expense[]
+  memories Memory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, updatedAt])
+  @@index([updatedAt])
 }
 
 model Day {
-  id        String   @id @default(cuid())
-  tripId    String
-  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  
+  id     String @id @default(cuid())
+  tripId String
+  trip   Trip   @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
   date      DateTime
-  dayNumber Int      // Day 1, Day 2, etc.
-  theme     String?  // E.g., "Cultural Exploration", "Beach Day"
-  
+  dayNumber Int // Day 1, Day 2, etc.
+  theme     String? // E.g., "Cultural Exploration", "Beach Day"
+
   activities ItineraryItem[]
-  
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([tripId, dayNumber])
+  @@index([tripId, date])
 }
 
 model ItineraryItem {
-  id          String   @id @default(cuid())
-  dayId       String
-  day         Day      @relation(fields: [dayId], references: [id], onDelete: Cascade)
-  
+  id    String @id @default(cuid())
+  dayId String
+  day   Day    @relation(fields: [dayId], references: [id], onDelete: Cascade)
+
   name        String
   description String?  @db.Text
-  startTime   String?  // e.g. "10:00 AM" - Consider using separate DateTime fields for strict sorting if needed
+  startTime   String? // e.g. "10:00 AM" - Consider using separate DateTime fields for strict sorting if needed
   endTime     String?
   location    String?
   lat         Decimal?
   lng         Decimal?
-  
-  order       Int      @default(0)
-  
-  placeId     String?
-  place       Place?   @relation(fields: [placeId], references: [id])
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+
+  order Int @default(0)
+
+  placeId String?
+  place   Place?  @relation(fields: [placeId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([dayId, order])
 }
 
 model Memory {
-  id            String   @id @default(cuid())
-  tripId        String
-  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  
-  type          String   // photo, video, note, document
-  title         String
-  description   String?  @db.Text
-  fileUrl       String?  // URL for photos, videos, documents
-  thumbnailUrl  String?  // Thumbnail for videos
-  content       String?  @db.Text // For notes (markdown content)
-  date          DateTime
-  location      String?
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id     String @id @default(cuid())
+  tripId String
+  trip   Trip   @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  type         String // photo, video, note, document
+  title        String
+  description  String?  @db.Text
+  fileUrl      String? // URL for photos, videos, documents
+  thumbnailUrl String? // Thumbnail for videos
+  content      String?  @db.Text // For notes (markdown content)
+  date         DateTime
+  location     String?
+  createdById  String?
+  creator      User?    @relation("MemoryCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tripId, createdAt])
+  @@index([createdById])
 }
 
 model Expense {
-  id          String   @id @default(cuid())
-  tripId      String
-  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  
+  id     String @id @default(cuid())
+  tripId String
+  trip   Trip   @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
   amount      Decimal
   currency    String   @default("USD")
-  category    String   // food, transport, lodging, activities, shopping, other
+  category    String // food, transport, lodging, activities, shopping, other
   description String?
   date        DateTime
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdById String?
+  creator     User?    @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tripId, createdAt])
+  @@index([createdById])
 }
 
 model TripUser {
-  id        String   @id @default(cuid())
-  tripId    String
-  userId    String
-  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id     String @id @default(cuid())
+  tripId String
+  userId String
+  trip   Trip   @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@unique([tripId, userId])
+  @@index([userId])
 }
 
 model City {
-  id        String   @id @default(cuid())
-  name      String
-  lat       Decimal?
-  lng       Decimal?
-  tripId    String
-  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  
-  places    Place[]
-  
+  id     String   @id @default(cuid())
+  name   String
+  lat    Decimal?
+  lng    Decimal?
+  tripId String
+  trip   Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  places Place[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([tripId])
 }
 
 model Place {
-  id           String   @id @default(cuid())
-  name         String
-  address      String?
-  phoneNumber  String?
-  lat          Decimal?
-  lng          Decimal?
-  category     String?
-  rating       Decimal?
-  price        Int?
-  photo        String?
-  reason       String?  @db.Text
-  googleUrl    String?
-  url          String?
-  
-  cityId       String
-  city         City     @relation(fields: [cityId], references: [id], onDelete: Cascade)
-  
+  id          String   @id @default(cuid())
+  name        String
+  address     String?
+  phoneNumber String?
+  lat         Decimal?
+  lng         Decimal?
+  category    String?
+  rating      Decimal?
+  price       Int?
+  photo       String?
+  reason      String?  @db.Text
+  googleUrl   String?
+  url         String?
+
+  cityId String
+  city   City   @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
   itineraryItems ItineraryItem[]
-  
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([cityId])
+}
+
+model RateLimitBucket {
+  key       String   @id
+  count     Int
+  limit     Int
+  resetAt   DateTime
+  windowMs  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([resetAt])
 }

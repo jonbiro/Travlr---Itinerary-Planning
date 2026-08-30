@@ -1,11 +1,12 @@
 import { z } from "zod"
+import { PRODUCT_LIMITS } from "@/lib/product-limits"
 
 export const generatedItinerarySchema = z.object({
     tripName: z.string().trim().min(1).max(200),
     summary: z.string().trim().max(5_000),
     days: z.array(
         z.object({
-            day: z.number().int().min(1).max(366),
+            day: z.number().int().min(1).max(PRODUCT_LIMITS.maxTripDays),
             theme: z.string().trim().max(200),
             activities: z.array(
                 z.object({
@@ -14,10 +15,25 @@ export const generatedItinerarySchema = z.object({
                     time: z.string().trim().max(100),
                     location: z.string().trim().max(500),
                 }),
-            ).max(50),
+            ).max(PRODUCT_LIMITS.maxActivitiesPerDay),
         }),
-    ).max(366),
-}).strict()
+    ).max(PRODUCT_LIMITS.maxTripDays),
+}).strict().superRefine((itinerary, ctx) => {
+    const activityCount = itinerary.days.reduce(
+        (total, day) => total + day.activities.length,
+        0,
+    )
+
+    if (activityCount > PRODUCT_LIMITS.maxActivitiesPerTrip) {
+        ctx.addIssue({
+            code: "too_big",
+            maximum: PRODUCT_LIMITS.maxActivitiesPerTrip,
+            origin: "number",
+            path: ["days"],
+            message: `An itinerary cannot contain more than ${PRODUCT_LIMITS.maxActivitiesPerTrip} activities.`,
+        })
+    }
+})
 
 export type GeneratedItinerary = z.infer<typeof generatedItinerarySchema>
 

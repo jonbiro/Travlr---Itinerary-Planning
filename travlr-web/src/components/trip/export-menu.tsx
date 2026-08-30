@@ -172,7 +172,7 @@ export function ExportMenu({ trip, expenses, packingItems, className }: ExportMe
                     disabled={isExporting !== null}
                 >
                     <FileJson className="h-4 w-4 mr-2" />
-                    <span className="flex-1">Full Trip (JSON)</span>
+                    <span className="flex-1">Itinerary snapshot (JSON)</span>
                     {isExporting === 'trip-json' && (
                         <Loader2 className="h-4 w-4 animate-spin ml-2" />
                     )}

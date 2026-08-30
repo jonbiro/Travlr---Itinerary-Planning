@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client"
 import { z } from "zod"
+import { PRODUCT_LIMITS } from "@/lib/product-limits"
 
 export const itineraryActivitySchema = z.object({
     name: z.string().trim().min(1).max(200),
@@ -9,7 +10,7 @@ export const itineraryActivitySchema = z.object({
 }).strict()
 
 export const itineraryChangeSchema = z.object({
-    day: z.number().int().positive().max(366),
+    day: z.number().int().positive().max(PRODUCT_LIMITS.maxTripDays),
     action: z.enum(["add", "remove", "replace"]),
     activity: itineraryActivitySchema,
 }).strict()
@@ -18,7 +19,7 @@ export type ItineraryChange = z.infer<typeof itineraryChangeSchema>
 
 type PersistItineraryResult =
     | { status: "updated"; message: string }
-    | { status: "not-found" | "day-not-found" | "invalid-day" | "not-changed"; message: string }
+    | { status: "not-found" | "day-not-found" | "invalid-day" | "not-changed" | "limit-reached"; message: string }
 
 function tripDayCount(startDate: Date | null, endDate: Date | null) {
     if (!startDate || !endDate) return null
@@ -86,6 +87,7 @@ export async function persistItineraryChange(
             include: {
                 activities: {
                     orderBy: { order: "asc" },
+                    take: PRODUCT_LIMITS.maxActivitiesPerDay + 1,
                 },
             },
         })
@@ -112,6 +114,23 @@ export async function persistItineraryChange(
         }
 
         if (change.action === "add") {
+            const totalActivityCount = await tx.itineraryItem.count({
+                where: { day: { tripId: trip.id } },
+            })
+            if (totalActivityCount >= PRODUCT_LIMITS.maxActivitiesPerTrip) {
+                return {
+                    status: "limit-reached",
+                    message: `This trip already has the maximum of ${PRODUCT_LIMITS.maxActivitiesPerTrip} activities.`,
+                }
+            }
+
+            if (day.activities.length >= PRODUCT_LIMITS.maxActivitiesPerDay) {
+                return {
+                    status: "limit-reached",
+                    message: `Day ${change.day} already has the maximum of ${PRODUCT_LIMITS.maxActivitiesPerDay} activities.`,
+                }
+            }
+
             const nextOrder = day.activities.reduce(
                 (highest, activity) => Math.max(highest, activity.order),
                 -1,

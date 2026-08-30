@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 
-import { getPrismaClient } from "@/lib/prisma"
+import { ensureDemoUser, getPrismaClient } from "@/lib/prisma"
 import { getCurrentUser, unauthorizedResponse } from "@/lib/current-user"
+import { consumeRateLimitAsync, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit"
 import { JSON_BODY_LIMITS, jsonBodyErrorResponse, readJsonBody } from "@/lib/request-json"
+import { collectionPageSize, PRODUCT_LIMITS } from "@/lib/product-limits"
 
 const tripIdQuerySchema = z.object({
     tripId: z.string().trim().min(1),
@@ -53,12 +55,15 @@ function invalidExpenseData(error: z.ZodError) {
     )
 }
 
-function serializeExpense(expense: { amount: unknown }) {
-    return {
+function serializeExpense<T extends { amount: unknown }>(expense: T) {
+    const serialized = {
         ...expense,
         // Prisma returns Decimal for amounts; the client-side expense type uses a number.
         amount: Number(expense.amount),
     }
+    // Creator ids are authorization metadata, not client-facing fields.
+    delete (serialized as { createdById?: unknown }).createdById
+    return serialized
 }
 
 export async function GET(request: Request) {
@@ -83,19 +88,46 @@ export async function GET(request: Request) {
 
         const trip = await prisma.trip.findFirst({
             where: tripAccessFilter(parsedQuery.data.tripId, currentUser.id),
-            select: { id: true },
+            select: { id: true, userId: true },
         })
 
         if (!trip) {
             return NextResponse.json({ error: "Trip not found" }, { status: 404 })
         }
 
+        const pageSize = collectionPageSize(searchParams.get("limit"))
         const expenses = await prisma.expense.findMany({
             where: { tripId: trip.id },
-            orderBy: { createdAt: "desc" },
+            select: {
+                id: true,
+                tripId: true,
+                amount: true,
+                currency: true,
+                category: true,
+                description: true,
+                date: true,
+                createdAt: true,
+                updatedAt: true,
+                createdById: true,
+            },
+            orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+            take: pageSize + 1,
         })
 
-        return NextResponse.json({ expenses: expenses.map(serializeExpense) })
+        const hasMore = expenses.length > pageSize
+        return NextResponse.json({
+            expenses: expenses.slice(0, pageSize).map((expense) => ({
+                ...serializeExpense(expense),
+                canDelete: trip.userId === currentUser.id || expense.createdById === currentUser.id,
+            })),
+            hasMore,
+        }, {
+            headers: {
+                "Cache-Control": "private, no-store",
+                "X-Result-Limit": String(pageSize),
+                "X-Has-More": String(hasMore),
+            },
+        })
     } catch (error) {
         console.error("[TRIP_EXPENSES_GET]", error)
         return NextResponse.json({ error: "Failed to load expenses" }, { status: 500 })
@@ -109,6 +141,14 @@ export async function POST(request: Request) {
 
         const prisma = getPrismaClient()
         if (!prisma) return databaseUnavailable()
+
+        const mutationLimit = await consumeRateLimitAsync(
+            `mutation:${currentUser.id}`,
+            RATE_LIMITS.mutation,
+            prisma,
+        )
+        if (!mutationLimit.allowed) return rateLimitResponse(mutationLimit)
+        if (currentUser.isDemo) await ensureDemoUser(prisma)
 
         const json = await readJsonBody(request, JSON_BODY_LIMITS.expense)
         if (!json.ok) return jsonBodyErrorResponse(json)
@@ -125,6 +165,16 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: "Trip not found" }, { status: 404 })
         }
 
+        const expenseCount = await prisma.expense.count({
+            where: { tripId: trip.id },
+        })
+        if (expenseCount >= PRODUCT_LIMITS.maxExpensesPerTrip) {
+            return NextResponse.json(
+                { error: `A trip can contain up to ${PRODUCT_LIMITS.maxExpensesPerTrip} expenses.` },
+                { status: 409 },
+            )
+        }
+
         const expense = await prisma.expense.create({
             data: {
                 tripId: trip.id,
@@ -133,10 +183,11 @@ export async function POST(request: Request) {
                 category: parsed.data.category,
                 description: parsed.data.description ?? null,
                 date: parsed.data.date,
+                createdById: currentUser.id,
             },
         })
 
-        return NextResponse.json(serializeExpense(expense), { status: 201 })
+        return NextResponse.json({ ...serializeExpense(expense), canDelete: true }, { status: 201 })
     } catch (error) {
         console.error("[TRIP_EXPENSES_POST]", error)
         return NextResponse.json({ error: "Failed to create expense" }, { status: 500 })
@@ -163,6 +214,13 @@ export async function DELETE(request: Request) {
         const prisma = getPrismaClient()
         if (!prisma) return databaseUnavailable()
 
+        const mutationLimit = await consumeRateLimitAsync(
+            `mutation:${currentUser.id}`,
+            RATE_LIMITS.mutation,
+            prisma,
+        )
+        if (!mutationLimit.allowed) return rateLimitResponse(mutationLimit)
+
         // Filter through the trip relation so an expense is never deleted
         // unless its trip is owned by, or shared with, the current user.
         const expense = await prisma.expense.findFirst({
@@ -175,10 +233,23 @@ export async function DELETE(request: Request) {
                     ],
                 },
             },
-            select: { id: true },
+            select: {
+                id: true,
+                createdById: true,
+                trip: { select: { userId: true } },
+            },
         })
 
         if (!expense) {
+            return NextResponse.json({ error: "Expense not found" }, { status: 404 })
+        }
+
+        // Owners can clean up legacy and member-created records. Members can
+        // delete only records they created; legacy rows without creator data
+        // remain owner-managed until they are edited or removed by the owner.
+        const canDelete = expense.trip.userId === currentUser.id
+            || expense.createdById === currentUser.id
+        if (!canDelete) {
             return NextResponse.json({ error: "Expense not found" }, { status: 404 })
         }
 

@@ -36,12 +36,25 @@ type TripDetails = {
     days: TripDay[]
 }
 
+type AuthState = "auth" | "setup"
+
 function asString(value: unknown): string | null {
     return typeof value === "string" && value.trim() ? value : null
 }
 
 function asNumber(value: unknown, fallback: number): number {
     return typeof value === "number" && Number.isFinite(value) ? value : fallback
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function classifyAuthFailure(payload: unknown): AuthState {
+    const record = isRecord(payload) ? payload : null
+    return record?.code === "AUTH_NOT_CONFIGURED" || record?.authConfigured === false
+        ? "setup"
+        : "auth"
 }
 
 function normalizeActivity(value: unknown, index: number): Activity {
@@ -98,13 +111,18 @@ function normalizeTrip(value: unknown): TripDetails | null {
 function formatDate(value: string | null): string | null {
     if (!value) return null
 
-    const date = new Date(value)
+    // Date-only values from the database represent a calendar day, not a
+    // moment in the viewer's timezone. Formatting them in UTC prevents a
+    // trip starting on July 1 from appearing as June 30 in the Americas.
+    const dateOnly = value.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
+    const date = new Date(dateOnly ? `${dateOnly}T00:00:00.000Z` : value)
     if (Number.isNaN(date.getTime())) return null
 
     return new Intl.DateTimeFormat(undefined, {
         month: "short",
         day: "numeric",
         year: "numeric",
+        timeZone: "UTC",
     }).format(date)
 }
 
@@ -128,32 +146,45 @@ export default function TripDetailsPage() {
     const [trip, setTrip] = useState<TripDetails | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
+    const [authState, setAuthState] = useState<AuthState | null>(null)
 
-    const loadTrip = useCallback(async () => {
+    const loadTrip = useCallback(async (signal?: AbortSignal) => {
         if (!tripId) return
 
         setIsLoading(true)
         setError(null)
+        setAuthState(null)
 
         try {
-            const response = await fetch(`/api/trips/${encodeURIComponent(tripId)}`)
+            const response = await fetch(`/api/trips/${encodeURIComponent(tripId)}`, { signal })
+            const payload: unknown = await response.json().catch(() => null)
+            if (response.status === 401) {
+                const nextAuthState = classifyAuthFailure(payload)
+                setAuthState(nextAuthState)
+                throw new Error(nextAuthState === "setup"
+                    ? "Sign-in is not configured for this environment yet."
+                    : "Sign in to view this itinerary.")
+            }
             if (response.status === 404) throw new Error("This trip could not be found.")
             if (!response.ok) throw new Error("We couldn’t load this itinerary right now.")
 
-            const payload: unknown = await response.json()
             const normalizedTrip = normalizeTrip(payload)
             if (!normalizedTrip) throw new Error("We couldn’t read this itinerary right now.")
 
             setTrip(normalizedTrip)
         } catch (loadError) {
+            if (signal?.aborted) return
             setError(loadError instanceof Error ? loadError.message : "We couldn’t load this itinerary right now.")
         } finally {
-            setIsLoading(false)
+            if (!signal?.aborted) setIsLoading(false)
         }
     }, [tripId])
 
     useEffect(() => {
-        void loadTrip()
+        const controller = new AbortController()
+        void loadTrip(controller.signal)
+
+        return () => controller.abort()
     }, [loadTrip])
 
     if (isLoading) {
@@ -168,16 +199,33 @@ export default function TripDetailsPage() {
     }
 
     if (error || !trip) {
+        const isSetup = authState === "setup"
+        const isAuth = authState === "auth"
+
         return (
             <main className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-4">
                 <div className="max-w-md text-center">
-                    <h1 className="text-2xl font-bold">Itinerary unavailable</h1>
-                    <p className="mt-2 text-muted-foreground">{error ?? "This trip could not be found."}</p>
+                    <h1 className="text-2xl font-bold">
+                        {isAuth ? "Sign in to view this itinerary" : isSetup ? "Finish setting up Travlr" : "Itinerary unavailable"}
+                    </h1>
+                    <p className="mt-2 text-muted-foreground">
+                        {isAuth
+                            ? "Your trip details are private. Sign in to continue planning with your group."
+                            : isSetup
+                                ? "Sign-in is not configured for this environment yet. Add the required authentication settings, then try again."
+                            : error ?? "This trip could not be found."}
+                    </p>
                     <div className="mt-6 flex justify-center gap-2">
-                        <Button type="button" variant="outline" onClick={() => void loadTrip()}>
-                            <RefreshCw className="h-4 w-4" />
-                            Try again
-                        </Button>
+                        {isAuth ? (
+                            <Button asChild>
+                                <Link href="/api/auth/signin">Sign in</Link>
+                            </Button>
+                        ) : (
+                            <Button type="button" variant="outline" onClick={() => void loadTrip()}>
+                                <RefreshCw className="h-4 w-4" />
+                                Try again
+                            </Button>
+                        )}
                         <Button asChild>
                             <Link href="/trips">Back to trips</Link>
                         </Button>
@@ -218,7 +266,7 @@ export default function TripDetailsPage() {
                             </div>
                         </div>
                         <Button asChild>
-                            <Link href="/dashboard">
+                            <Link href={`/dashboard?tripId=${encodeURIComponent(trip.id)}`}>
                                 Open dashboard
                                 <ArrowRight className="h-4 w-4" />
                             </Link>
@@ -231,9 +279,9 @@ export default function TripDetailsPage() {
                 {trip.days.length === 0 ? (
                     <div className="rounded-xl border border-dashed p-10 text-center">
                         <h2 className="text-lg font-semibold">Your itinerary is still taking shape</h2>
-                        <p className="mt-2 text-sm text-muted-foreground">Open the dashboard to add activities and make this trip yours.</p>
+                        <p className="mt-2 text-sm text-muted-foreground">Open the dashboard to continue planning. Trip members can view the itinerary and manage shared expenses and memories.</p>
                         <Button asChild className="mt-5">
-                            <Link href="/dashboard">Continue planning</Link>
+                            <Link href={`/dashboard?tripId=${encodeURIComponent(trip.id)}`}>Continue planning</Link>
                         </Button>
                     </div>
                 ) : (

@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 
-import { getPrismaClient } from "@/lib/prisma"
+import { ensureDemoUser, getPrismaClient } from "@/lib/prisma"
 import { getCurrentUser, unauthorizedResponse } from "@/lib/current-user"
+import { consumeRateLimitAsync, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit"
 import { JSON_BODY_LIMITS, jsonBodyErrorResponse, readJsonBody } from "@/lib/request-json"
+import { collectionPageSize, PRODUCT_LIMITS } from "@/lib/product-limits"
 
 const tripIdQuerySchema = z.object({
     tripId: z.string().trim().min(1),
@@ -53,6 +55,12 @@ function invalidMemoryData(error: z.ZodError) {
     )
 }
 
+function serializeMemory<T extends { createdById?: string | null }>(memory: T) {
+    const serialized = { ...memory }
+    delete (serialized as { createdById?: unknown }).createdById
+    return serialized
+}
+
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const parsedQuery = tripIdQuerySchema.safeParse({
@@ -72,19 +80,49 @@ export async function GET(request: Request) {
 
         const trip = await prisma.trip.findFirst({
             where: tripAccessFilter(parsedQuery.data.tripId, currentUser.id),
-            select: { id: true },
+            select: { id: true, userId: true },
         })
 
         if (!trip) {
             return NextResponse.json({ error: "Trip not found" }, { status: 404 })
         }
 
+        const pageSize = collectionPageSize(searchParams.get("limit"))
         const memories = await prisma.memory.findMany({
             where: { tripId: trip.id },
-            orderBy: { createdAt: "desc" },
+            select: {
+                id: true,
+                tripId: true,
+                type: true,
+                title: true,
+                description: true,
+                content: true,
+                fileUrl: true,
+                thumbnailUrl: true,
+                date: true,
+                location: true,
+                createdAt: true,
+                updatedAt: true,
+                createdById: true,
+            },
+            orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+            take: pageSize + 1,
         })
 
-        return NextResponse.json({ memories })
+        const hasMore = memories.length > pageSize
+        return NextResponse.json({
+            memories: memories.slice(0, pageSize).map((memory) => ({
+                ...serializeMemory(memory),
+                canDelete: trip.userId === currentUser.id || memory.createdById === currentUser.id,
+            })),
+            hasMore,
+        }, {
+            headers: {
+                "Cache-Control": "private, no-store",
+                "X-Result-Limit": String(pageSize),
+                "X-Has-More": String(hasMore),
+            },
+        })
     } catch (error) {
         console.error("[TRIP_MEMORIES_GET]", error)
         return NextResponse.json({ error: "Failed to load memories" }, { status: 500 })
@@ -98,6 +136,14 @@ export async function POST(request: Request) {
 
         const prisma = getPrismaClient()
         if (!prisma) return databaseUnavailable()
+
+        const mutationLimit = await consumeRateLimitAsync(
+            `mutation:${currentUser.id}`,
+            RATE_LIMITS.mutation,
+            prisma,
+        )
+        if (!mutationLimit.allowed) return rateLimitResponse(mutationLimit)
+        if (currentUser.isDemo) await ensureDemoUser(prisma)
 
         const json = await readJsonBody(request, JSON_BODY_LIMITS.memory)
         if (!json.ok) return jsonBodyErrorResponse(json)
@@ -114,6 +160,16 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: "Trip not found" }, { status: 404 })
         }
 
+        const memoryCount = await prisma.memory.count({
+            where: { tripId: trip.id },
+        })
+        if (memoryCount >= PRODUCT_LIMITS.maxMemoriesPerTrip) {
+            return NextResponse.json(
+                { error: `A trip can contain up to ${PRODUCT_LIMITS.maxMemoriesPerTrip} memories.` },
+                { status: 409 },
+            )
+        }
+
         const memory = await prisma.memory.create({
             data: {
                 tripId: trip.id,
@@ -125,10 +181,11 @@ export async function POST(request: Request) {
                 thumbnailUrl: parsed.data.thumbnailUrl ?? null,
                 date: parsed.data.date ?? new Date(),
                 location: parsed.data.location ?? null,
+                createdById: currentUser.id,
             },
         })
 
-        return NextResponse.json(memory, { status: 201 })
+        return NextResponse.json({ ...serializeMemory(memory), canDelete: true }, { status: 201 })
     } catch (error) {
         console.error("[TRIP_MEMORIES_POST]", error)
         return NextResponse.json({ error: "Failed to create memory" }, { status: 500 })
@@ -152,6 +209,13 @@ export async function DELETE(request: Request) {
         const prisma = getPrismaClient()
         if (!prisma) return databaseUnavailable()
 
+        const mutationLimit = await consumeRateLimitAsync(
+            `mutation:${currentUser.id}`,
+            RATE_LIMITS.mutation,
+            prisma,
+        )
+        if (!mutationLimit.allowed) return rateLimitResponse(mutationLimit)
+
         // Filter through the trip relation so a memory is never deleted unless
         // its trip is owned by, or shared with, the current user.
         const memory = await prisma.memory.findFirst({
@@ -164,10 +228,20 @@ export async function DELETE(request: Request) {
                     ],
                 },
             },
-            select: { id: true },
+            select: {
+                id: true,
+                createdById: true,
+                trip: { select: { userId: true } },
+            },
         })
 
         if (!memory) {
+            return NextResponse.json({ error: "Memory not found" }, { status: 404 })
+        }
+
+        const canDelete = memory.trip.userId === currentUser.id
+            || memory.createdById === currentUser.id
+        if (!canDelete) {
             return NextResponse.json({ error: "Memory not found" }, { status: 404 })
         }
 

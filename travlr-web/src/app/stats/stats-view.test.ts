@@ -28,13 +28,32 @@ describe("travel stats data", () => {
             totalDaysPlanned: 3,
             totalActivities: 4,
             topDestinations: [
-                { name: "Paris, France", visits: 2 },
-                { name: "Tokyo, Japan", visits: 1 },
+                { name: "Paris, France", tripCount: 2 },
+                { name: "Tokyo, Japan", tripCount: 1 },
             ],
         })
     })
 
     it("rejects a response that is not a trips array", () => {
         expect(() => normalizeTrips({ trips: [] })).toThrow("We couldn’t read your trips right now.")
+    })
+
+    it("ignores malformed trip records without dropping valid empty itineraries", () => {
+        const trips = normalizeTrips([
+            {},
+            {
+                destination: "Tokyo, Japan",
+                days: [],
+            },
+        ])
+
+        expect(trips).toEqual([
+            {
+                destination: "Tokyo, Japan",
+                dayCount: 0,
+                activityCount: 0,
+            },
+        ])
+        expect(deriveTravelStats(trips).totalTrips).toBe(1)
     })
 })

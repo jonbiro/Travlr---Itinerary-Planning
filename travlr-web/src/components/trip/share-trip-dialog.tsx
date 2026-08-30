@@ -1,7 +1,8 @@
 "use client"
 
-import { useState } from "react"
-import { Copy, UserPlus, Loader2 } from "lucide-react"
+import { FormEvent, useEffect, useState } from "react"
+import Link from "next/link"
+import { Check, Copy, UserPlus, Loader2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -16,38 +17,73 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
 
+type AuthState = "auth" | "setup"
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function classifyAuthFailure(payload: unknown): AuthState {
+    const record = isRecord(payload) ? payload : null
+    return record?.code === "AUTH_NOT_CONFIGURED" || record?.authConfigured === false
+        ? "setup"
+        : "auth"
+}
+
 export function ShareTripDialog({ tripId }: { tripId?: string }) {
     const [email, setEmail] = useState("")
     const [isLoading, setIsLoading] = useState(false)
     const [open, setOpen] = useState(false)
+    const [isCopied, setIsCopied] = useState(false)
+    const [authState, setAuthState] = useState<AuthState | null>(null)
+    const shareUrl = tripId ? `${typeof window !== 'undefined' ? window.location.origin : ''}/trips/${encodeURIComponent(tripId)}` : "Select a trip first"
+
+    useEffect(() => {
+        setIsCopied(false)
+        setAuthState(null)
+    }, [tripId])
 
     const onInvite = async () => {
-        if (!email) return
+        const normalizedEmail = email.trim().toLowerCase()
+        if (!normalizedEmail) return
         if (!tripId) {
             toast.error("No trip selected")
             return
         }
 
         setIsLoading(true)
+        setAuthState(null)
         try {
             const response = await fetch("/api/trip/share", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ tripId, email }),
+                body: JSON.stringify({ tripId, email: normalizedEmail }),
             })
 
+            const responseBody = await response.text()
+            let payload: unknown = null
+            try {
+                payload = JSON.parse(responseBody)
+            } catch {
+                // The API also uses concise plain-text errors.
+            }
+
+            if (response.status === 401) {
+                const nextAuthState = classifyAuthFailure(payload)
+                setAuthState(nextAuthState)
+                throw new Error(nextAuthState === "setup"
+                    ? "Sign-in is not configured for this environment yet."
+                    : "Sign in to invite collaborators.")
+            }
+
             if (!response.ok) {
-                const responseBody = await response.text()
-                let message = responseBody
-                try {
-                    message = JSON.parse(responseBody)?.error || responseBody
-                } catch {
-                    // The API also uses concise plain-text errors.
-                }
+                const message = isRecord(payload) && typeof payload.error === "string"
+                    ? payload.error
+                    : responseBody
                 throw new Error(message || "Failed to invite user")
             }
 
-            toast.success(`Invited ${email} to the trip!`)
+            toast.success("Share request accepted")
             setEmail("")
             setOpen(false)
         } catch (error) {
@@ -57,17 +93,30 @@ export function ShareTripDialog({ tripId }: { tripId?: string }) {
         }
     }
 
-    const onCopyLink = () => {
+    const handleInviteSubmit = (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault()
+        void onInvite()
+    }
+
+    const onCopyLink = async () => {
         if (!tripId) return
-        navigator.clipboard.writeText(`${window.location.origin}/trips/${tripId}`)
-        toast.success("Link copied to clipboard")
+        const link = `${window.location.origin}/trips/${encodeURIComponent(tripId)}`
+
+        try {
+            await navigator.clipboard.writeText(link)
+            setIsCopied(true)
+            toast.success("Trip link copied")
+            window.setTimeout(() => setIsCopied(false), 2_000)
+        } catch {
+            toast.error("Could not copy the link. Select it and copy manually.")
+        }
     }
 
     return (
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-2" disabled={!tripId}>
-                    <UserPlus className="h-4 w-4" />
+                    <UserPlus className="h-4 w-4" aria-hidden="true" />
                     Share
                 </Button>
             </DialogTrigger>
@@ -75,27 +124,28 @@ export function ShareTripDialog({ tripId }: { tripId?: string }) {
                 <DialogHeader>
                     <DialogTitle>Share Trip</DialogTitle>
                     <DialogDescription>
-                        Invite friends to plan this trip with you.
+                        Add an existing Travlr account to this trip. Members can view the itinerary and manage shared expenses and memories; itinerary edits stay with the trip owner.
                     </DialogDescription>
                 </DialogHeader>
                 <div className="flex items-center space-x-2">
                     <div className="grid flex-1 gap-2">
-                        <Label htmlFor="link" className="sr-only">
+                        <Label htmlFor="trip-share-link" className="sr-only">
                             Link
                         </Label>
                         <Input
-                            id="link"
-                            defaultValue={tripId ? `${typeof window !== 'undefined' ? window.location.origin : ''}/trips/${tripId}` : "Select a trip first"}
+                            id="trip-share-link"
+                            value={shareUrl}
                             readOnly
                             disabled={!tripId}
+                            aria-label="Trip sharing link"
                         />
                     </div>
-                    <Button type="submit" size="sm" className="px-3" onClick={onCopyLink} disabled={!tripId}>
-                        <span className="sr-only">Copy</span>
-                        <Copy className="h-4 w-4" />
+                    <Button type="button" size="sm" className="px-3" onClick={() => void onCopyLink()} disabled={!tripId} aria-label="Copy trip sharing link">
+                        {isCopied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
+                        <span className="sr-only">{isCopied ? "Copied" : "Copy link"}</span>
                     </Button>
                 </div>
-                <div className="flex items-center space-x-2">
+                <form className="flex items-center space-x-2" onSubmit={handleInviteSubmit}>
                     <div className="grid flex-1 gap-2">
                         <Label htmlFor="email" className="sr-only">Email</Label>
                         <Input
@@ -103,12 +153,31 @@ export function ShareTripDialog({ tripId }: { tripId?: string }) {
                             placeholder="friend@example.com"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
+                            type="email"
+                            autoComplete="email"
                         />
                     </div>
-                    <Button onClick={onInvite} disabled={isLoading || !email}>
-                        {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Invite"}
+                    <Button type="submit" disabled={isLoading || !email.trim()}>
+                        {isLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : "Add"}
                     </Button>
-                </div>
+                </form>
+                {authState && (
+                    <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm" role="alert">
+                        <p className="font-medium">
+                            {authState === "setup" ? "Finish setting up Travlr" : "Sign in to invite collaborators"}
+                        </p>
+                        <p className="mt-1 text-muted-foreground">
+                            {authState === "setup"
+                                ? "Sign-in is not configured for this environment yet. Add the required authentication settings, then try again."
+                                : "You need to sign in before you can invite someone to this trip."}
+                        </p>
+                        {authState === "auth" && (
+                            <Button asChild type="button" variant="link" size="sm" className="mt-1 h-auto px-0">
+                                <Link href="/api/auth/signin">Sign in</Link>
+                            </Button>
+                        )}
+                    </div>
+                )}
             </DialogContent>
         </Dialog>
     )

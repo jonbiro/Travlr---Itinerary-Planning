@@ -150,44 +150,59 @@ class CityShow extends Component {
     // Create An InfoWindow
     let infowindow = new window.google.maps.InfoWindow();
 
-    window.google.maps.event.addListener(infowindow, "domready", () => {
-      document.getElementById("saveBtn").addEventListener("click", e => {
-        this.saveFunc(
-          e.target.dataset.lat,
-          e.target.dataset.lng,
-          e.target.dataset.name
-        );
-      });
-    });
     // Display Dynamic Markers
     this.state.venues.forEach(myVenue => {
-      let contentString = `${myVenue.venue.name} <br> ${
-        myVenue.venue.categories[0].name
-      } <br>`;
+      const venueLocation = myVenue.venue.location;
+      if (
+        !venueLocation ||
+        !Number.isFinite(venueLocation.lat) ||
+        !Number.isFinite(venueLocation.lng)
+      ) {
+        return;
+      }
 
       // Create A Marker
       let marker = new window.google.maps.Marker({
         position: {
-          lat: myVenue.venue.location.lat,
-          lng: myVenue.venue.location.lng
+          lat: venueLocation.lat,
+          lng: venueLocation.lng
         },
         map: window.map,
         title: myVenue.venue.name
       });
 
       // Click on A Marker!
-      marker.addListener("click", function() {
-        // Change the content
-        infowindow.setContent(
-          `<div id='myInfoWinDiv'>
-            ${contentString}
-            <button
-            	data-lat="${myVenue.venue.location.lat}"
-            	data-lng="${myVenue.venue.location.lng}"
-            	data-name="${myVenue.venue.name}"
-            	id="saveBtn">Save</button>
-            </div>`
-        );
+      marker.addListener("click", () => {
+        const content = document.createElement("div");
+        content.id = "myInfoWinDiv";
+
+        const venueName = document.createElement("strong");
+        venueName.textContent = myVenue.venue.name;
+        content.appendChild(venueName);
+        content.appendChild(document.createElement("br"));
+
+        const category = document.createElement("span");
+        category.textContent =
+          (myVenue.venue.categories &&
+            myVenue.venue.categories[0] &&
+            myVenue.venue.categories[0].name) ||
+          "Place";
+        content.appendChild(category);
+        content.appendChild(document.createElement("br"));
+
+        const saveButton = document.createElement("button");
+        saveButton.type = "button";
+        saveButton.textContent = "Save";
+        saveButton.dataset.lat = venueLocation.lat;
+        saveButton.dataset.lng = venueLocation.lng;
+        saveButton.dataset.name = myVenue.venue.name;
+        saveButton.addEventListener("click", event => {
+          const { lat, lng, name } = event.currentTarget.dataset;
+          this.saveFunc(lat, lng, name);
+        });
+        content.appendChild(saveButton);
+
+        infowindow.setContent(content);
         // Open An InfoWindow
         infowindow.open(window.map, marker);
       });

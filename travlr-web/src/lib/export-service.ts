@@ -1,5 +1,6 @@
 // Export service for generating CSV and other export formats
 import { Trip } from "@/lib/types/trip"
+import { slugForFilename } from "@/lib/product-limits"
 
 export interface ExportColumn {
     key: string
@@ -7,14 +8,24 @@ export interface ExportColumn {
     formatter?: (value: unknown) => string
 }
 
+/**
+ * Spreadsheet applications may execute a CSV cell beginning with =, +, -, or
+ * @ as a formula. Prefixing those values with an apostrophe preserves what a
+ * user sees while keeping exports inert when opened in Excel or Sheets.
+ */
+export function neutralizeSpreadsheetFormula(value: string): string {
+    return /^[\t\r\n ]*[=+\-@]/.test(value) ? `'${value}` : value
+}
+
 // Generate CSV content from data
 export function generateCSV<T extends Record<string, unknown>>(
     data: T[],
     columns: ExportColumn[]
 ): string {
-    const escapeCSV = (value: unknown): string => {
+    const escapeCSV = (value: unknown, protectFormula = true): string => {
         if (value === null || value === undefined) return ''
-        const str = String(value)
+        const raw = String(value)
+        const str = protectFormula ? neutralizeSpreadsheetFormula(raw) : raw
         if (str.includes(',') || str.includes('"') || str.includes('\n')) {
             return `"${str.replace(/"/g, '""')}"`
         }
@@ -22,7 +33,7 @@ export function generateCSV<T extends Record<string, unknown>>(
     }
 
     // Headers
-    const headers = columns.map(col => escapeCSV(col.header)).join(',')
+    const headers = columns.map(col => escapeCSV(col.header, false)).join(',')
 
     // Rows
     const rows = data.map(item =>
@@ -110,7 +121,7 @@ export function exportItineraryToCSV(trip: Partial<Trip>) {
 
     const csv = generateCSV(rows, columns)
     const tripName = trip.tripName || 'trip'
-    const filename = `${tripName.replace(/\s+/g, '-').toLowerCase()}-itinerary`
+    const filename = `${slugForFilename(tripName)}-itinerary`
     downloadCSV(csv, filename)
 }
 
@@ -134,7 +145,7 @@ export function exportExpensesToCSV(
     ]
 
     const csv = generateCSV(expenses, columns)
-    const filename = `${tripName.replace(/\s+/g, '-').toLowerCase()}-expenses`
+    const filename = `${slugForFilename(tripName)}-expenses`
     downloadCSV(csv, filename)
 }
 
@@ -156,13 +167,13 @@ export function exportPackingListToCSV(
     ]
 
     const csv = generateCSV(items, columns)
-    const filename = `${tripName.replace(/\s+/g, '-').toLowerCase()}-packing-list`
+    const filename = `${slugForFilename(tripName)}-packing-list`
     downloadCSV(csv, filename)
 }
 
 // Export full trip as JSON (for backup/import)
 export function exportTripAsJSON(trip: Partial<Trip>) {
-    const filename = `${trip.tripName?.replace(/\s+/g, '-').toLowerCase() || 'trip'}-backup`
+    const filename = `${slugForFilename(trip.tripName)}-backup`
     downloadJSON(trip, filename)
 }
 
@@ -171,11 +182,11 @@ export function exportItineraryToMarkdown(trip: Partial<Trip>): string {
     let md = `# ${trip.tripName || 'Trip'}\n\n`
 
     if (trip.destination) {
-        md += `📍 **Destination:** ${trip.destination}\n\n`
+        md += `**Destination:** ${trip.destination}\n\n`
     }
 
     if (trip.startDate && trip.endDate) {
-        md += `📅 ${formatDateForExport(trip.startDate)} - ${formatDateForExport(trip.endDate)}\n\n`
+        md += `**Dates:** ${formatDateForExport(trip.startDate)} - ${formatDateForExport(trip.endDate)}\n\n`
     }
 
     md += `---\n\n`
@@ -195,7 +206,7 @@ export function exportItineraryToMarkdown(trip: Partial<Trip>): string {
             }
 
             if (activity.location) {
-                md += `📍 *${activity.location}*\n\n`
+                md += `**Location:** *${activity.location}*\n\n`
             }
         })
     })
@@ -219,6 +230,6 @@ export function downloadMarkdown(content: string, filename: string) {
 
 export function exportItineraryAsMarkdown(trip: Partial<Trip>) {
     const md = exportItineraryToMarkdown(trip)
-    const filename = `${trip.tripName?.replace(/\s+/g, '-').toLowerCase() || 'trip'}-itinerary`
+    const filename = `${slugForFilename(trip.tripName)}-itinerary`
     downloadMarkdown(md, filename)
 }

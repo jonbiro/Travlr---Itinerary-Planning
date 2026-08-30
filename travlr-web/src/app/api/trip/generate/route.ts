@@ -9,8 +9,9 @@ import {
 } from "@/lib/validators/generated-itinerary"
 import { ensureDemoUser, getPrismaClient } from "@/lib/prisma"
 import { getCurrentUser, unauthorizedResponse } from "@/lib/current-user"
-import { consumeRateLimit, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit"
+import { consumeRateLimitAsync, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit"
 import { JSON_BODY_LIMITS, jsonBodyErrorResponse, readJsonBody } from "@/lib/request-json"
+import { PRODUCT_LIMITS } from "@/lib/product-limits"
 
 export const maxDuration = 60
 
@@ -19,14 +20,14 @@ export async function POST(req: Request) {
         const currentUser = await getCurrentUser()
         if (!currentUser) return unauthorizedResponse()
 
-        const rateLimit = consumeRateLimit(`generate:${currentUser.id}`, RATE_LIMITS.generate)
+        const prisma = getPrismaClient()
+        const rateLimit = await consumeRateLimitAsync(`generate:${currentUser.id}`, RATE_LIMITS.generate, prisma)
         if (!rateLimit.allowed) return rateLimitResponse(rateLimit)
 
         const json = await readJsonBody(req, JSON_BODY_LIMITS.generateTrip)
         if (!json.ok) return jsonBodyErrorResponse(json)
         const body = createTripSchema.parse(json.data)
 
-        const prisma = getPrismaClient()
         if (!prisma) {
             return Response.json(
                 { error: "Database is not configured. Add DATABASE_URL before creating trips." },
@@ -42,9 +43,9 @@ export async function POST(req: Request) {
         }
 
         const requestedDayCount = inclusiveDayCount(body.startDate, body.endDate)
-        if (requestedDayCount > 366) {
+        if (requestedDayCount > PRODUCT_LIMITS.maxTripDays) {
             return Response.json(
-                { error: "Trips longer than 366 days are not supported." },
+                { error: `Trips longer than ${PRODUCT_LIMITS.maxTripDays} days are not supported.` },
                 { status: 400 },
             )
         }
@@ -52,6 +53,7 @@ export async function POST(req: Request) {
         const result = await generateText({
             model: openai(process.env.OPENAI_MODEL || "gpt-5.6-luna"),
             output: Output.object({ schema: generatedItinerarySchema }),
+            maxOutputTokens: 12_000,
             prompt: `Generate a detailed ${body.budget} travel itinerary for a trip to ${body.destination} from ${body.startDate} to ${body.endDate}.
       The traveler is interested in: ${body.interests.join(", ")}.
       Create a unique name for the trip and exactly ${requestedDayCount} daily breakdowns.
@@ -65,7 +67,27 @@ export async function POST(req: Request) {
                 { status: 502 },
             )
         }
+        const activityCount = tripData.days.reduce(
+            (total, day) => total + day.activities.length,
+            0,
+        )
+        if (activityCount > PRODUCT_LIMITS.maxActivitiesPerTrip) {
+            return Response.json(
+                { error: `Itineraries are limited to ${PRODUCT_LIMITS.maxActivitiesPerTrip} activities.` },
+                { status: 502 },
+            )
+        }
         if (currentUser.isDemo) await ensureDemoUser(prisma)
+
+        const tripCount = await prisma.trip.count({
+            where: { userId: currentUser.id },
+        })
+        if (tripCount >= PRODUCT_LIMITS.maxTripsPerUser) {
+            return Response.json(
+                { error: `You can save up to ${PRODUCT_LIMITS.maxTripsPerUser} trips.` },
+                { status: 409 },
+            )
+        }
 
         const budgetAmounts = {
             budget: 1000,
@@ -107,7 +129,10 @@ export async function POST(req: Request) {
             include: {
                 days: {
                     include: {
-                        activities: true
+                        activities: {
+                            orderBy: { order: "asc" },
+                            take: PRODUCT_LIMITS.maxActivitiesPerDay,
+                        },
                     },
                     orderBy: {
                         dayNumber: 'asc'

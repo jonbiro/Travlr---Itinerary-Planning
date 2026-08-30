@@ -8,11 +8,14 @@ export interface WeatherDay {
     humidity: number
     precipitation: number // percentage
     windSpeed: number // km/h
-    icon: string
 }
 
 export interface WeatherForecast {
     location: string
+    /** IANA timezone for the forecast location, as returned by OpenWeather. */
+    timezone: string
+    /** Current UTC offset for the forecast location, in seconds. */
+    timezoneOffset: number
     current: {
         temp: number
         condition: string
@@ -46,6 +49,18 @@ export class WeatherServiceError extends Error {
     }
 }
 
+const WEATHER_CACHE_TTL_MS = 10 * 60 * 1_000
+const WEATHER_STALE_TTL_MS = 60 * 60 * 1_000
+const WEATHER_CACHE_MAX_ENTRIES = 500
+
+type WeatherCacheEntry = {
+    forecast: WeatherForecast
+    expiresAt: number
+    staleUntil: number
+}
+
+const weatherCache = new Map<string, WeatherCacheEntry>()
+
 type JsonRecord = Record<string, unknown>
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -67,6 +82,36 @@ function invalidProviderResponse(options?: { cause?: unknown }) {
         'The weather provider returned an invalid response. Please try again later.',
         options,
     )
+}
+
+function cloneForecast(forecast: WeatherForecast): WeatherForecast {
+    return {
+        ...forecast,
+        current: { ...forecast.current },
+        daily: forecast.daily.map((day) => ({
+            ...day,
+            date: new Date(day.date),
+        })),
+    }
+}
+
+function pruneWeatherCache(now: number) {
+    for (const [key, entry] of weatherCache) {
+        if (entry.staleUntil <= now) weatherCache.delete(key)
+    }
+
+    if (weatherCache.size <= WEATHER_CACHE_MAX_ENTRIES) return
+
+    const oldest = [...weatherCache.entries()]
+        .sort(([, first], [, second]) => first.expiresAt - second.expiresAt)
+    for (const [key] of oldest.slice(0, weatherCache.size - WEATHER_CACHE_MAX_ENTRIES)) {
+        weatherCache.delete(key)
+    }
+}
+
+/** Clear weather cache state between unit tests or a deliberate refresh. */
+export function clearWeatherCache() {
+    weatherCache.clear()
 }
 
 async function fetchProviderJson(url: string): Promise<unknown> {
@@ -94,18 +139,6 @@ async function fetchProviderJson(url: string): Promise<unknown> {
     return data
 }
 
-export function getWeatherIcon(condition: string): string {
-    const icons: Record<string, string> = {
-        sunny: '☀️',
-        cloudy: '☁️',
-        rainy: '🌧️',
-        stormy: '⛈️',
-        snowy: '❄️',
-        'partly-cloudy': '⛅',
-    }
-    return icons[condition] || '🌤️'
-}
-
 export async function getWeatherForecast(location: string): Promise<WeatherForecast> {
     const apiKey = process.env.OPENWEATHERMAP_API_KEY?.trim()
 
@@ -118,61 +151,106 @@ export async function getWeatherForecast(location: string): Promise<WeatherForec
     }
 
     const normalizedLocation = location.trim()
-    if (!normalizedLocation) {
+    if (!normalizedLocation || normalizedLocation.length > 200) {
         throw new WeatherServiceError('INVALID_LOCATION', 400, 'A location is required to load weather.')
     }
 
-    // First get coordinates from the location name.
-    const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(normalizedLocation)}&limit=1&appid=${apiKey}`
-    const geoData = await fetchProviderJson(geoUrl)
+    const cacheKey = normalizedLocation.toLocaleLowerCase()
+    const now = Date.now()
+    pruneWeatherCache(now)
+    const cached = weatherCache.get(cacheKey)
+    if (cached && cached.expiresAt > now) return cloneForecast(cached.forecast)
 
-    if (!Array.isArray(geoData)) {
-        throw invalidProviderResponse()
+    try {
+        // First get coordinates from the location name.
+        const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(normalizedLocation)}&limit=1&appid=${apiKey}`
+        const geoData = await fetchProviderJson(geoUrl)
+
+        if (!Array.isArray(geoData)) {
+            throw invalidProviderResponse()
+        }
+
+        const firstLocation = geoData[0]
+        if (firstLocation === undefined) {
+            throw new WeatherServiceError(
+                'LOCATION_NOT_FOUND',
+                404,
+                `No weather location was found for “${normalizedLocation}”.`,
+            )
+        }
+
+        if (
+            !isRecord(firstLocation)
+            || !isFiniteNumber(firstLocation.lat)
+            || !isFiniteNumber(firstLocation.lon)
+        ) {
+            throw invalidProviderResponse()
+        }
+
+        const { lat, lon } = firstLocation
+
+        // Get the available daily forecast (up to ten days, depending on the plan).
+        const forecastUrl = `https://api.openweathermap.org/data/3.0/onecall?lat=${lat}&lon=${lon}&exclude=minutely,hourly,alerts&units=metric&appid=${apiKey}`
+        const forecastData = await fetchProviderJson(forecastUrl)
+
+        try {
+            if (!isRecord(forecastData) || !isRecord(forecastData.current) || !Array.isArray(forecastData.daily)) {
+                throw invalidProviderResponse()
+            }
+
+            const { timezone, timezoneOffset } = parseForecastTimezone(forecastData)
+            const current = parseCurrentWeather(forecastData.current)
+            const daily = forecastData.daily.slice(0, 10).map(parseWeatherDay)
+
+            if (daily.length === 0) {
+                throw invalidProviderResponse()
+            }
+
+            const forecast = {
+                location: normalizedLocation,
+                timezone,
+                timezoneOffset,
+                current,
+                daily,
+            }
+            weatherCache.set(cacheKey, {
+                forecast,
+                expiresAt: Date.now() + WEATHER_CACHE_TTL_MS,
+                staleUntil: Date.now() + WEATHER_STALE_TTL_MS,
+            })
+            pruneWeatherCache(Date.now())
+            return cloneForecast(forecast)
+        } catch (error) {
+            if (error instanceof WeatherServiceError) throw error
+            throw invalidProviderResponse({ cause: error })
+        }
+    } catch (error) {
+        if (
+            cached
+            && cached.staleUntil > Date.now()
+            && error instanceof WeatherServiceError
+            && (error.code === "WEATHER_PROVIDER_ERROR" || error.code === "WEATHER_PROVIDER_RESPONSE_INVALID")
+        ) {
+            return cloneForecast(cached.forecast)
+        }
+        throw error
     }
+}
 
-    const firstLocation = geoData[0]
-    if (firstLocation === undefined) {
-        throw new WeatherServiceError(
-            'LOCATION_NOT_FOUND',
-            404,
-            `No weather location was found for “${normalizedLocation}”.`,
-        )
-    }
-
+function parseForecastTimezone(value: JsonRecord): Pick<WeatherForecast, 'timezone' | 'timezoneOffset'> {
+    // OpenWeather includes both fields on One Call responses. Keep a UTC fallback
+    // for older/mocked responses, while still rejecting malformed values when a
+    // provider response explicitly includes either field.
     if (
-        !isRecord(firstLocation)
-        || !isFiniteNumber(firstLocation.lat)
-        || !isFiniteNumber(firstLocation.lon)
+        ('timezone' in value && (typeof value.timezone !== 'string' || value.timezone.trim().length === 0))
+        || ('timezone_offset' in value && !isFiniteNumber(value.timezone_offset))
     ) {
         throw invalidProviderResponse()
     }
 
-    const { lat, lon } = firstLocation
-
-    // Get the available daily forecast (up to ten days, depending on the plan).
-    const forecastUrl = `https://api.openweathermap.org/data/3.0/onecall?lat=${lat}&lon=${lon}&exclude=minutely,hourly,alerts&units=metric&appid=${apiKey}`
-    const forecastData = await fetchProviderJson(forecastUrl)
-
-    try {
-        if (!isRecord(forecastData) || !isRecord(forecastData.current) || !Array.isArray(forecastData.daily)) {
-            throw invalidProviderResponse()
-        }
-
-        const current = parseCurrentWeather(forecastData.current)
-        const daily = forecastData.daily.slice(0, 10).map(parseWeatherDay)
-
-        if (daily.length === 0) {
-            throw invalidProviderResponse()
-        }
-
-        return {
-            location: normalizedLocation,
-            current,
-            daily,
-        }
-    } catch (error) {
-        if (error instanceof WeatherServiceError) throw error
-        throw invalidProviderResponse({ cause: error })
+    return {
+        timezone: typeof value.timezone === 'string' ? value.timezone : 'UTC',
+        timezoneOffset: isFiniteNumber(value.timezone_offset) ? value.timezone_offset : 0,
     }
 }
 
@@ -226,7 +304,6 @@ function parseWeatherDay(value: unknown): WeatherDay {
         humidity: value.humidity,
         precipitation: isFiniteNumber(value.pop) ? Math.round(value.pop * 100) : 0,
         windSpeed: Math.round(value.wind_speed * 3.6),
-        icon: getWeatherIcon(condition),
     }
 }
 

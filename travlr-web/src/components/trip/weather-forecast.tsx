@@ -1,11 +1,15 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Cloud, Sun, CloudRain, CloudSnow, Zap, Wind, Droplets, Loader2 } from "lucide-react"
+import Link from "next/link"
+import { Cloud, Sun, CloudRain, CloudSnow, Zap, Wind, Droplets, Loader2, RefreshCw } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { WeatherForecast } from "@/lib/weather-service"
+
+type AuthState = "auth" | "setup"
 
 interface WeatherForecastProps {
     destination?: string
@@ -22,15 +26,57 @@ const weatherIcons = {
 
 function WeatherIcon({ condition, className }: { condition: string; className?: string }) {
     const Icon = weatherIcons[condition as keyof typeof weatherIcons] || Cloud
-    return <Icon className={cn("h-8 w-8", className)} />
+    return <Icon className={cn("h-8 w-8", className)} aria-hidden="true" />
 }
 
-function formatDate(date: Date): { day: string; date: string } {
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-    const d = new Date(date)
+function classifyAuthFailure(payload: unknown): AuthState {
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return "auth"
+
+    const record = payload as Record<string, unknown>
+    return record.code === "AUTH_NOT_CONFIGURED" || record.authConfigured === false
+        ? "setup"
+        : "auth"
+}
+
+export function formatWeatherDate(
+    date: Date | string,
+    timezone = 'UTC',
+    timezoneOffset = 0,
+): { day: string; date: string } {
+    const instant = new Date(date)
+
+    // The API returns an IANA timezone for the destination. Formatting with it
+    // keeps the label stable even when the viewer is in another timezone.
+    try {
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: timezone,
+            weekday: 'short',
+            month: 'numeric',
+            day: 'numeric',
+        }).formatToParts(instant)
+        const getPart = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value
+        const day = getPart('weekday')
+        const month = getPart('month')
+        const dayOfMonth = getPart('day')
+
+        if (day && month && dayOfMonth) return { day, date: `${month}/${dayOfMonth}` }
+    } catch {
+        // Fall back to the provider's numeric offset for an invalid/unsupported
+        // timezone identifier. OpenWeather supplies this offset in seconds.
+    }
+
+    const shiftedInstant = new Date(instant.getTime() + timezoneOffset * 1_000)
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'UTC',
+        weekday: 'short',
+        month: 'numeric',
+        day: 'numeric',
+    }).formatToParts(shiftedInstant)
+    const getPart = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value
+
     return {
-        day: days[d.getDay()],
-        date: `${d.getMonth() + 1}/${d.getDate()}`
+        day: getPart('weekday') ?? '',
+        date: `${getPart('month') ?? ''}/${getPart('day') ?? ''}`,
     }
 }
 
@@ -38,6 +84,8 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
     const [forecast, setForecast] = useState<WeatherForecast | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [authState, setAuthState] = useState<AuthState | null>(null)
+    const [retryToken, setRetryToken] = useState(0)
     const hasDestination = Boolean(destination?.trim())
 
     useEffect(() => {
@@ -46,6 +94,7 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
             setForecast(null)
             setError(null)
             setIsLoading(false)
+            setAuthState(null)
             return
         }
         const requestedLocation: string = location
@@ -57,11 +106,20 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
             setIsLoading(true)
             setError(null)
             setForecast(null)
+            setAuthState(null)
             try {
                 const response = await fetch(`/api/weather?location=${encodeURIComponent(requestedLocation)}`, {
                     signal: controller.signal,
                 })
                 const payload = await response.json().catch(() => null) as unknown
+
+                if (response.status === 401) {
+                    const nextAuthState = classifyAuthFailure(payload)
+                    setAuthState(nextAuthState)
+                    throw new Error(nextAuthState === "setup"
+                        ? "Sign-in is not configured for this environment yet."
+                        : "Sign in to view weather forecasts.")
+                }
 
                 if (!response.ok) {
                     const serverMessage = isWeatherErrorPayload(payload) ? payload.error : null
@@ -90,7 +148,7 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
             isCurrentRequest = false
             controller.abort()
         }
-    }, [destination])
+    }, [destination, retryToken])
 
     if (!hasDestination) {
         return (
@@ -110,10 +168,43 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
         )
     }
 
+    if (authState) {
+        const isSetup = authState === "setup"
+
+        return (
+            <div className="flex h-full flex-col items-center justify-center space-y-4 p-8 text-center" role="alert">
+                <Cloud className="h-10 w-10 text-muted-foreground" aria-hidden="true" />
+                <div>
+                    <h3 className="font-semibold text-lg">{isSetup ? "Finish setting up Travlr" : "Sign in to see the forecast"}</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        {isSetup
+                            ? "Sign-in is not configured for this environment yet. Add the required authentication settings, then try again."
+                            : "Weather requests are tied to your Travlr account."}
+                    </p>
+                </div>
+                {isSetup ? (
+                    <Button type="button" variant="outline" onClick={() => setRetryToken((token) => token + 1)}>
+                        <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                        Try again
+                    </Button>
+                ) : (
+                    <Button asChild>
+                        <Link href="/api/auth/signin">Sign in</Link>
+                    </Button>
+                )}
+            </div>
+        )
+    }
+
     if (error) {
         return (
-            <div className="flex flex-col items-center justify-center p-8 text-center" role="alert">
+            <div className="flex flex-col items-center justify-center space-y-4 p-8 text-center" role="alert">
+                <Cloud className="h-10 w-10 text-muted-foreground" aria-hidden="true" />
                 <p className="text-destructive">{error}</p>
+                <Button type="button" variant="outline" size="sm" onClick={() => setRetryToken((token) => token + 1)}>
+                    <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                    Try again
+                </Button>
             </div>
         )
     }
@@ -125,8 +216,11 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
             {/* Current Weather */}
             <Card className="bg-gradient-to-br from-sky-500 to-blue-600 text-white border-0">
                 <CardHeader className="pb-2">
-                    <CardDescription className="text-white/80">{forecast.location}</CardDescription>
-                    <CardTitle className="text-4xl font-bold">{forecast.current.temp}°C</CardTitle>
+                    <CardDescription className="text-white/80">Current conditions · {forecast.location}</CardDescription>
+                    <CardTitle className="text-4xl font-bold">
+                        <span className="sr-only">Current temperature: </span>
+                        {forecast.current.temp}°C
+                    </CardTitle>
                 </CardHeader>
                 <CardContent>
                     <div className="flex items-center justify-between">
@@ -150,11 +244,15 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
 
             {/* 10-Day Forecast */}
             <div>
-                <h3 className="font-semibold mb-3">10-Day Forecast</h3>
+                <h3 className="mb-3 font-semibold">10-day forecast</h3>
                 <ScrollArea className="w-full whitespace-nowrap">
                     <div className="flex gap-3 pb-4">
                         {forecast.daily.map((day, index) => {
-                            const { day: dayName, date } = formatDate(day.date)
+                            const { day: dayName, date } = formatWeatherDate(
+                                day.date,
+                                forecast.timezone,
+                                forecast.timezoneOffset,
+                            )
                             return (
                                 <Card
                                     key={index}

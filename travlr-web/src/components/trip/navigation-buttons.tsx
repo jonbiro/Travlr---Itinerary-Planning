@@ -1,6 +1,6 @@
 "use client"
 
-import { MapPin, Navigation, Car } from "lucide-react"
+import { MapPin, Navigation, Car, Map, type LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
     DropdownMenu,
@@ -47,30 +47,32 @@ function generateUberUrl(location: string, coords?: { lat: number; lng: number }
     return `https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[formatted_address]=${encodeURIComponent(location)}`
 }
 
-const navigationApps = [
+type NavigationUrlGenerator = (location: string, coords?: { lat: number; lng: number }) => string
+
+const navigationApps: Array<{
+    name: string
+    icon: LucideIcon
+    generateUrl: NavigationUrlGenerator
+}> = [
     {
         name: "Google Maps",
-        icon: "🗺️",
+        icon: Map,
         generateUrl: generateGoogleMapsUrl,
-        color: "text-green-600",
     },
     {
         name: "Apple Maps",
-        icon: "🍎",
+        icon: MapPin,
         generateUrl: generateAppleMapsUrl,
-        color: "text-gray-600",
     },
     {
         name: "Waze",
-        icon: "🚗",
+        icon: Navigation,
         generateUrl: generateWazeUrl,
-        color: "text-blue-500",
     },
     {
         name: "Uber",
-        icon: "🚕",
+        icon: Car,
         generateUrl: generateUberUrl,
-        color: "text-black",
     },
 ]
 
@@ -80,7 +82,7 @@ export function NavigationButtons({
     className,
     variant = "default"
 }: NavigationButtonsProps) {
-    const openInApp = (generateUrl: typeof generateGoogleMapsUrl) => {
+    const openInApp = (generateUrl: NavigationUrlGenerator) => {
         const url = generateUrl(location, coordinates)
         window.open(url, "_blank", "noopener,noreferrer")
     }
@@ -90,12 +92,14 @@ export function NavigationButtons({
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                     <Button
+                        type="button"
                         variant="ghost"
                         size="icon"
                         className={cn("h-8 w-8", className)}
                         title="Open in maps"
+                        aria-label="Open location in a maps app"
                     >
-                        <Navigation className="h-4 w-4" />
+                        <Navigation className="h-4 w-4" aria-hidden="true" />
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -105,7 +109,7 @@ export function NavigationButtons({
                             onClick={() => openInApp(app.generateUrl)}
                             className="gap-2"
                         >
-                            <span>{app.icon}</span>
+                            <app.icon className="h-4 w-4" aria-hidden="true" />
                             <span>{app.name}</span>
                         </DropdownMenuItem>
                     ))}
@@ -118,8 +122,8 @@ export function NavigationButtons({
         <div className={cn("flex items-center gap-1", className)}>
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="gap-2">
-                        <MapPin className="h-4 w-4" />
+                    <Button type="button" variant="outline" size="sm" className="gap-2">
+                        <MapPin className="h-4 w-4" aria-hidden="true" />
                         Navigate
                     </Button>
                 </DropdownMenuTrigger>
@@ -130,7 +134,7 @@ export function NavigationButtons({
                             onClick={() => openInApp(app.generateUrl)}
                             className="gap-2 cursor-pointer"
                         >
-                            <span className="text-lg">{app.icon}</span>
+                            <app.icon className="h-4 w-4" aria-hidden="true" />
                             <span>Open in {app.name}</span>
                         </DropdownMenuItem>
                     ))}
@@ -152,28 +156,31 @@ export function QuickNavigationButtons({
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7"
-                onClick={() => window.open(generateGoogleMapsUrl(location, coordinates), "_blank")}
+                onClick={() => window.open(generateGoogleMapsUrl(location, coordinates), "_blank", "noopener,noreferrer")}
                 title="Open in Google Maps"
+                aria-label="Open in Google Maps"
             >
-                <MapPin className="h-3.5 w-3.5" />
+                <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
             </Button>
             <Button
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7"
-                onClick={() => window.open(generateWazeUrl(location, coordinates), "_blank")}
+                onClick={() => window.open(generateWazeUrl(location, coordinates), "_blank", "noopener,noreferrer")}
                 title="Get directions with Waze"
+                aria-label="Get directions with Waze"
             >
-                <Navigation className="h-3.5 w-3.5" />
+                <Navigation className="h-3.5 w-3.5" aria-hidden="true" />
             </Button>
             <Button
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7"
-                onClick={() => window.open(generateUberUrl(location, coordinates), "_blank")}
+                onClick={() => window.open(generateUberUrl(location, coordinates), "_blank", "noopener,noreferrer")}
                 title="Request Uber ride"
+                aria-label="Request an Uber ride"
             >
-                <Car className="h-3.5 w-3.5" />
+                <Car className="h-3.5 w-3.5" aria-hidden="true" />
             </Button>
         </div>
     )

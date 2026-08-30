@@ -1,185 +1,173 @@
-const CACHE_NAME = 'travlr-v3';
+const CACHE_NAME = "travlr-v5";
 
-// Assets to cache immediately on install
+// Keep this list deliberately small. It contains only public shell assets;
+// authenticated route HTML and API responses must never enter the cache.
 const STATIC_ASSETS = [
-    '/',
-    '/dashboard',
-    '/stats',
-    '/explore',
-    '/trips',
-    '/manifest.json',
-    '/icons/icon-192x192.png',
-    '/icons/icon-512x512.png',
+    "/",
+    "/offline.html",
+    "/manifest.json",
+    "/icons/icon-192x192.png",
+    "/icons/icon-512x512.png",
 ];
 
-// Install event - cache static assets
-self.addEventListener('install', (event) => {
+const OFFLINE_PAGE = "/offline.html";
+const PUBLIC_NAVIGATION_PATHS = new Set(["/", "/explore"]);
+
+const isSameOrigin = (url) => url.origin === self.location.origin;
+
+const isPrivateRoute = (pathname) => (
+    pathname === "/dashboard"
+    || pathname.startsWith("/dashboard/")
+    || pathname === "/trips"
+    || pathname.startsWith("/trips/")
+    || pathname === "/stats"
+    || pathname.startsWith("/stats/")
+);
+
+const isPublicNavigation = (pathname) => PUBLIC_NAVIGATION_PATHS.has(pathname);
+
+const isRouterRequest = (request, url) => (
+    request.headers.has("RSC")
+    || request.headers.has("Next-Router-Prefetch")
+    || request.headers.has("next-router-prefetch")
+    || url.searchParams.has("_rsc")
+);
+
+const isCacheableStaticAsset = (url) => (
+    url.pathname.startsWith("/_next/static/")
+    || url.pathname.startsWith("/icons/")
+    || url.pathname.startsWith("/images/")
+    || url.pathname === "/manifest.json"
+);
+
+self.addEventListener("install", (event) => {
     event.waitUntil(
-        caches.open(CACHE_NAME).then((cache) => {
-            console.log('Service Worker: Caching static assets');
-            // A failed page request should not prevent the service worker from
-            // installing. This is especially useful when the app is first
-            // deployed and one of the optional routes is not warm yet.
-            return Promise.all(
-                STATIC_ASSETS.map((asset) =>
-                    cache.add(asset).catch((error) => {
-                        console.warn(`Service Worker: Could not cache ${asset}`, error);
-                    })
-                )
-            );
-        })
+        caches.open(CACHE_NAME).then((cache) => Promise.all(
+            STATIC_ASSETS.map((asset) => cache.add(asset).catch(() => undefined)),
+        )),
     );
-    // Activate immediately
     self.skipWaiting();
 });
 
-// Activate event - clean up old caches
-self.addEventListener('activate', (event) => {
+self.addEventListener("activate", (event) => {
     event.waitUntil(
-        caches.keys().then((cacheNames) => {
-            return Promise.all(
-                cacheNames
-                    .filter((name) => name !== CACHE_NAME)
-                    .map((name) => caches.delete(name))
-            );
-        })
+        caches.keys().then((cacheNames) => Promise.all(
+            cacheNames
+                .filter((name) => name !== CACHE_NAME)
+                .map((name) => caches.delete(name)),
+        )),
     );
-    // Take control of all pages immediately
     self.clients.claim();
 });
 
-// Fetch event - network first, fallback to cache
-self.addEventListener('fetch', (event) => {
+self.addEventListener("fetch", (event) => {
     const { request } = event;
     const url = new URL(request.url);
 
-    // Skip non-GET requests
-    if (request.method !== 'GET') return;
+    if (request.method !== "GET" || !isSameOrigin(url)) return;
 
-    // Skip external requests
-    if (url.origin !== location.origin) return;
+    // Let Next's flight requests and prefetches use the network. Caching a
+    // flight response can hydrate the wrong route or user session.
+    if (isRouterRequest(request, url)) return;
 
-    // Skip API requests - always fetch from network
-    if (url.pathname.startsWith('/api/')) {
+    // APIs and auth endpoints are always network-only. In particular, do not
+    // synthesize an offline API response that could be mistaken for user data.
+    if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) return;
+
+    if (request.mode === "navigate") {
         event.respondWith(
-            fetch(request).catch(() => {
-                return new Response(
-                    JSON.stringify({ error: 'You are offline' }),
-                    {
+            // Avoid satisfying a private route from a stale browser HTTP
+            // cache entry that may contain the public app shell.
+            fetch(new Request(request, { cache: "no-store" })).catch(async () => {
+                // Never substitute the public landing page for an
+                // authenticated route. It makes a private URL appear to
+                // have loaded successfully and can discard the route state.
+                const offlinePage = await caches.match(OFFLINE_PAGE);
+                if (!isPublicNavigation(url.pathname)) {
+                    return offlinePage || new Response("Travlr is offline. Reconnect to continue.", {
                         status: 503,
-                        headers: { 'Content-Type': 'application/json' }
-                    }
-                );
-            })
+                        headers: { "Content-Type": "text/plain; charset=utf-8" },
+                    });
+                }
+
+                const cached = await caches.match(request) || await caches.match("/");
+                return cached || offlinePage || new Response("Travlr is offline. Reconnect to continue.", {
+                    status: 503,
+                    headers: { "Content-Type": "text/plain; charset=utf-8" },
+                });
+            }),
         );
         return;
     }
 
-    // For navigation requests, try network first
-    if (request.mode === 'navigate') {
-        event.respondWith(
-            fetch(request)
-                .then((response) => {
-                    // Clone and cache the response
-                    const responseClone = response.clone();
-                    caches.open(CACHE_NAME).then((cache) => {
-                        cache.put(request, responseClone);
-                    });
-                    return response;
-                })
-                .catch(() => {
-                    // Return cached version if offline
-                    return caches.match(request).then((cached) => {
-                        return cached || caches.match('/dashboard');
-                    });
-                })
-        );
-        return;
-    }
+    // Private route assets are network-only even if a browser asks for them
+    // as a subresource. Only versioned/static public assets are cacheable.
+    if (isPrivateRoute(url.pathname) || !isCacheableStaticAsset(url)) return;
 
-    // For other assets, try cache first then network
     event.respondWith(
         caches.match(request).then((cached) => {
-            if (cached) {
-                // Return cached but also update in background
-                fetch(request).then((response) => {
-                    if (!response.ok) return;
-                    caches.open(CACHE_NAME).then((cache) => {
-                        cache.put(request, response.clone());
-                    });
-                }).catch(() => { });
-                return cached;
-            }
+            if (cached) return cached;
 
-            // Not cached, fetch from network
             return fetch(request).then((response) => {
-                // Cache successful responses
                 if (response.ok) {
-                    const responseClone = response.clone();
-                    caches.open(CACHE_NAME).then((cache) => {
-                        cache.put(request, responseClone);
-                    });
+                    void caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
                 }
                 return response;
             });
-        })
+        }),
     );
 });
 
-// Listen for messages from the app
-self.addEventListener('message', (event) => {
-    if (event.data === 'skipWaiting') {
-        self.skipWaiting();
-    }
+self.addEventListener("message", (event) => {
+    if (event.data === "skipWaiting") self.skipWaiting();
 });
 
-// Background sync for offline actions
-self.addEventListener('sync', (event) => {
-    if (event.tag === 'sync-trips') {
-        event.waitUntil(syncTrips());
-    }
-});
-
-async function syncTrips() {
-    // Placeholder for syncing offline changes
-    console.log('Syncing trips...');
-}
-
-// Push notifications for flight updates
-self.addEventListener('push', (event) => {
+self.addEventListener("push", (event) => {
     if (!event.data) return;
 
-    const data = event.data.json();
+    let data;
+    try {
+        data = event.data.json();
+    } catch {
+        data = { body: event.data.text() };
+    }
 
     event.waitUntil(
-        self.registration.showNotification(data.title || 'Travlr', {
-            body: data.body,
-            icon: '/icons/icon-192x192.png',
-            badge: '/icons/icon-192x192.png',
-            tag: data.tag || 'travlr-notification',
-            data: data.url,
-        })
+        self.registration.showNotification(data.title || "Travlr", {
+            body: data.body || "You have an update from Travlr.",
+            icon: "/icons/icon-192x192.png",
+            badge: "/icons/icon-192x192.png",
+            tag: data.tag || "travlr-notification",
+            data: typeof data.url === "string" && data.url.startsWith("/") ? data.url : "/",
+        }),
     );
 });
 
-// Handle notification click
-self.addEventListener('notificationclick', (event) => {
+self.addEventListener("notificationclick", (event) => {
     event.notification.close();
 
-    const url = event.notification.data || '/dashboard';
+    const requestedTarget = typeof event.notification.data === "string"
+        ? event.notification.data
+        : "/";
+    const targetUrl = requestedTarget.startsWith("/") && !requestedTarget.startsWith("//")
+        ? new URL(requestedTarget, self.location.origin)
+        : new URL("/", self.location.origin);
 
     event.waitUntil(
-        clients.matchAll({ type: 'window' }).then((windowClients) => {
-            // Focus existing window if open
+        self.clients.matchAll({ type: "window" }).then((windowClients) => {
             for (const client of windowClients) {
-                if (client.url.includes(url) && 'focus' in client) {
+                const clientUrl = new URL(client.url);
+                if (
+                    clientUrl.origin === targetUrl.origin
+                    && clientUrl.pathname === targetUrl.pathname
+                    && clientUrl.search === targetUrl.search
+                    && "focus" in client
+                ) {
                     return client.focus();
                 }
             }
-            // Otherwise open new window
-            if (clients.openWindow) {
-                return clients.openWindow(url);
-            }
-        })
+            if (self.clients.openWindow) return self.clients.openWindow(targetUrl.href);
+            return undefined;
+        }),
     );
 });

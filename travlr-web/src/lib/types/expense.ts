@@ -19,13 +19,13 @@ export type ExpenseCategory =
     | 'shopping'
     | 'other'
 
-export const EXPENSE_CATEGORIES: { value: ExpenseCategory; label: string; icon: string }[] = [
-    { value: 'food', label: 'Food & Dining', icon: '🍽️' },
-    { value: 'transport', label: 'Transportation', icon: '🚗' },
-    { value: 'lodging', label: 'Accommodation', icon: '🏨' },
-    { value: 'activities', label: 'Activities & Tours', icon: '🎯' },
-    { value: 'shopping', label: 'Shopping', icon: '🛍️' },
-    { value: 'other', label: 'Other', icon: '📝' },
+export const EXPENSE_CATEGORIES: { value: ExpenseCategory; label: string }[] = [
+    { value: 'food', label: 'Food & Dining' },
+    { value: 'transport', label: 'Transportation' },
+    { value: 'lodging', label: 'Accommodation' },
+    { value: 'activities', label: 'Activities & Tours' },
+    { value: 'shopping', label: 'Shopping' },
+    { value: 'other', label: 'Other' },
 ]
 
 export function getCategoryInfo(category: ExpenseCategory) {

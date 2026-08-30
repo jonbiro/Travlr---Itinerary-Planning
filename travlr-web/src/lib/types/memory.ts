@@ -16,11 +16,11 @@ export interface Memory {
 
 export type MemoryType = 'photo' | 'video' | 'note' | 'document'
 
-export const MEMORY_TYPES: { value: MemoryType; label: string; icon: string }[] = [
-    { value: 'photo', label: 'Photo', icon: '📷' },
-    { value: 'video', label: 'Video', icon: '🎬' },
-    { value: 'note', label: 'Note', icon: '📝' },
-    { value: 'document', label: 'Document', icon: '📄' },
+export const MEMORY_TYPES: { value: MemoryType; label: string }[] = [
+    { value: 'photo', label: 'Photo' },
+    { value: 'video', label: 'Video' },
+    { value: 'note', label: 'Note' },
+    { value: 'document', label: 'Document' },
 ]
 
 export function getMemoryTypeInfo(type: MemoryType) {

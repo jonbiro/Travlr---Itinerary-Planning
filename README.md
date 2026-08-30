@@ -6,6 +6,12 @@ The Rails application at the repository root is an archived implementation retai
 
 Legacy Rails credential files are intentionally not stored in Git. If you revive that application, create a new encrypted credentials file locally and supply its newly generated `RAILS_MASTER_KEY` through the deployment environment; never reuse the key that appeared in this repository's history.
 
+> **Security notice:** deleted credentials remain recoverable from Git history.
+> Treat every historical provider credential and Rails signing key as
+> compromised: revoke and rotate them at the provider, review access logs, and
+> coordinate any history rewrite with every collaborator. See
+> [`SECURITY.md`](SECURITY.md) for the reporting policy.
+
 ### Legacy Rails environment
 
 The legacy API reads these values from the deployment environment; none belong in source control:
@@ -20,24 +26,23 @@ Copy `travlr/.env.example` for the frontend variable names. Provider keys should
 An historical demo of that implementation is available in the [original walkthrough](https://youtu.be/oz5oYOEf87U). Its old Heroku deployment instructions have been removed to prevent the archived service from being mistaken for the supported application.
 
 
-## Built With
+## Active stack
 
-* [React](https://reactjs.org/) - Front end interface
-* [React-Router-Dom](https://www.npmjs.com/package/react-router-dom) - Page navigation 
-* [Rails](https://rubyonrails.org/) - Save user credentials/information and references to event information
-* [PostgreSQL](https://www.postgresql.org/) - Database
-* [Bcrypt](https://www.npmjs.com/package/bcrypt) - Hash user credentials
-* [JWT](https://jwt.io/) - Secure transfer of credentials
-* [Semantic-UI](https://semantic-ui.com/) - CSS theming
-* [Semantic-UI React](https://react.semantic-ui.com/) - Styled react components
-* [Google Maps](https://cloud.google.com/maps-platform/) - Map, and user interactivity
-* [Foursquare](https://developer.foursquare.com/)  - Event and venue information
+* Next.js and React
+* TypeScript and Tailwind CSS
+* Prisma and PostgreSQL
+* NextAuth
+* OpenAI and Google Maps integrations
+
+The archived implementation uses Rails, React Router, Semantic UI, JWT, and
+Foursquare. Those dependencies are retained for historical reference only.
 
 
 ## Contributing
 
-Please read [CONTRIBUTING.md](https://gist.github.com/) for details on our code of conduct, and the process for submitting pull requests to us.
+Open an issue before a large change, keep changes focused on `travlr-web`, and
+include the relevant lint, test, typecheck, and build results with pull requests.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
+This project is licensed under the MIT License — see [LICENSE](LICENSE).

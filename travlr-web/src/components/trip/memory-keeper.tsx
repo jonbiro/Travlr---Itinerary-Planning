@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import Link from "next/link"
 import {
     Camera,
     FileText,
@@ -10,9 +11,10 @@ import {
     Trash2,
     Loader2,
     Calendar,
-    MapPin
+    MapPin,
+    ExternalLink,
+    RefreshCw,
 } from "lucide-react"
-import { format } from "date-fns"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -43,11 +45,60 @@ interface MemoryKeeperProps {
     tripId?: string
 }
 
+type AuthState = "auth" | "setup"
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function classifyAuthFailure(payload: unknown): AuthState {
+    const record = isRecord(payload) ? payload : null
+    return record?.code === "AUTH_NOT_CONFIGURED" || record?.authConfigured === false
+        ? "setup"
+        : "auth"
+}
+
 const typeIcons = {
     photo: ImageIcon,
     video: Video,
     note: FileText,
     document: FileText,
+}
+
+function MemoryTypeIcon({ type, className }: { type: MemoryType; className?: string }) {
+    const Icon = typeIcons[type] ?? FileText
+    return <Icon className={className} aria-hidden="true" />
+}
+
+function formatDateOnly(value: Date | string, options: Intl.DateTimeFormatOptions = {}): string {
+    const source = typeof value === "string" ? value : value.toISOString()
+    const dateOnly = source.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
+    const date = new Date(dateOnly ? `${dateOnly}T00:00:00.000Z` : source)
+    if (Number.isNaN(date.getTime())) return "Date unavailable"
+
+    return new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        timeZone: "UTC",
+        ...options,
+    }).format(date)
+}
+
+function todayAsDateInput(): string {
+    const now = new Date()
+    return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
+}
+
+function isSafeExternalUrl(value: string | null | undefined): value is string {
+    if (!value) return false
+
+    try {
+        const url = new URL(value)
+        return url.protocol === "https:" || url.protocol === "http:"
+    } catch {
+        return false
+    }
 }
 
 export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
@@ -59,37 +110,69 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
     const [activeTab, setActiveTab] = useState<string>("all")
     const [formError, setFormError] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
+    const [authState, setAuthState] = useState<AuthState | null>(null)
+    const [retryToken, setRetryToken] = useState(0)
 
     // Form state
     const [title, setTitle] = useState("")
     const [description, setDescription] = useState("")
     const [type, setType] = useState<MemoryType>("note")
-    const [date, setDate] = useState(format(new Date(), "yyyy-MM-dd"))
+    const [date, setDate] = useState(todayAsDateInput)
     const [location, setLocation] = useState("")
     const [content, setContent] = useState("") // For notes
     const [fileUrl, setFileUrl] = useState("")
 
     // Load memories
     useEffect(() => {
-        if (!tripId) return
+        if (!tripId) {
+            setMemories([])
+            setIsLoading(false)
+            setError(null)
+            setAuthState(null)
+            return
+        }
+
+        const requestedTripId = tripId
+        const controller = new AbortController()
 
         async function loadMemories() {
             setIsLoading(true)
             setError(null)
+            setAuthState(null)
             try {
-                const res = await fetch(`/api/trip/memories?tripId=${tripId}`)
-                const data = await res.json().catch(() => null)
-                if (!res.ok) throw new Error(data?.error || "Unable to load memories")
-                setMemories(data.memories || [])
+                const res = await fetch(`/api/trip/memories?tripId=${encodeURIComponent(requestedTripId)}`, {
+                    signal: controller.signal,
+                })
+                const data: unknown = await res.json().catch(() => null)
+                if (res.status === 401) {
+                    const nextAuthState = classifyAuthFailure(data)
+                    setAuthState(nextAuthState)
+                    throw new Error(nextAuthState === "setup"
+                        ? "Sign-in is not configured for this environment yet."
+                        : "Sign in to view and manage shared memories.")
+                }
+                if (!res.ok) {
+                    const message = typeof data === "object" && data !== null && "error" in data && typeof data.error === "string"
+                        ? data.error
+                        : "Unable to load memories"
+                    throw new Error(message)
+                }
+                const memories = typeof data === "object" && data !== null && "memories" in data && Array.isArray(data.memories)
+                    ? data.memories as Memory[]
+                    : []
+                setMemories(memories)
             } catch (loadError) {
+                if (controller.signal.aborted) return
                 setError(loadError instanceof Error ? loadError.message : "Unable to load memories")
             } finally {
-                setIsLoading(false)
+                if (!controller.signal.aborted) setIsLoading(false)
             }
         }
 
-        loadMemories()
-    }, [tripId])
+        void loadMemories()
+
+        return () => controller.abort()
+    }, [tripId, retryToken])
 
     const filteredMemories = activeTab === "all"
         ? memories
@@ -99,7 +182,7 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
         setTitle("")
         setDescription("")
         setType("note")
-        setDate(format(new Date(), "yyyy-MM-dd"))
+        setDate(todayAsDateInput())
         setLocation("")
         setContent("")
         setFileUrl("")
@@ -132,18 +215,28 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                     description: description || null,
                     content: type === "note" ? content : null,
                     fileUrl: type !== "note" ? fileUrl : null,
-                    date: new Date(date).toISOString(),
+                    date: new Date(`${date}T00:00:00.000Z`).toISOString(),
                     location: location || null,
                 }),
             })
 
             if (!res.ok) {
-                const payload = await res.json().catch(() => null)
-                throw new Error(payload?.error || "Unable to save this memory")
+                const payload: unknown = await res.json().catch(() => null)
+                if (res.status === 401) {
+                    const nextAuthState = classifyAuthFailure(payload)
+                    setAuthState(nextAuthState)
+                    throw new Error(nextAuthState === "setup"
+                        ? "Sign-in is not configured for this environment yet."
+                        : "Sign in to save shared memories.")
+                }
+                const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
+                    ? payload.error
+                    : "Unable to save this memory"
+                throw new Error(message)
             }
 
             const newMemory = await res.json()
-            setMemories([newMemory, ...memories])
+            setMemories((previousMemories) => [newMemory, ...previousMemories])
             resetForm()
             setDialogOpen(false)
         } catch (error) {
@@ -160,9 +253,21 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                 method: "DELETE",
             })
 
-            const payload = await res.json().catch(() => null)
-            if (!res.ok) throw new Error(payload?.error || "Unable to delete memory")
-            setMemories(memories.filter(m => m.id !== memoryId))
+            const payload: unknown = await res.json().catch(() => null)
+            if (res.status === 401) {
+                const nextAuthState = classifyAuthFailure(payload)
+                setAuthState(nextAuthState)
+                throw new Error(nextAuthState === "setup"
+                    ? "Sign-in is not configured for this environment yet."
+                    : "Sign in to manage shared memories.")
+            }
+            if (!res.ok) {
+                const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
+                    ? payload.error
+                    : "Unable to delete memory"
+                throw new Error(message)
+            }
+            setMemories((previousMemories) => previousMemories.filter((memory) => memory.id !== memoryId))
             setSelectedMemory(null)
         } catch (deleteError) {
             setError(deleteError instanceof Error ? deleteError.message : "Unable to delete memory")
@@ -172,8 +277,36 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
     if (!tripId) {
         return (
             <div className="flex flex-col items-center justify-center p-8 text-center space-y-4 h-full">
-                <Camera className="h-12 w-12 text-muted-foreground opacity-50" />
+                <Camera className="h-12 w-12 text-muted-foreground opacity-50" aria-hidden="true" />
                 <p className="text-muted-foreground">Create or select a trip to add memories</p>
+            </div>
+        )
+    }
+
+    if (authState) {
+        const isSetup = authState === "setup"
+
+        return (
+            <div className="flex h-full flex-col items-center justify-center space-y-4 p-8 text-center" role="alert">
+                <Camera className="h-10 w-10 text-muted-foreground" aria-hidden="true" />
+                <div>
+                    <h3 className="font-semibold text-lg">{isSetup ? "Finish setting up Travlr" : "Sign in to manage shared memories"}</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        {isSetup
+                            ? "Sign-in is not configured for this environment yet. Add the required authentication settings, then try again."
+                            : "Trip members can save notes, photos, and documents after signing in."}
+                    </p>
+                </div>
+                {isSetup ? (
+                    <Button type="button" variant="outline" onClick={() => setRetryToken((token) => token + 1)}>
+                        <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                        Try again
+                    </Button>
+                ) : (
+                    <Button asChild>
+                        <Link href="/api/auth/signin">Sign in</Link>
+                    </Button>
+                )}
             </div>
         )
     }
@@ -181,7 +314,7 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
     if (isLoading) {
         return (
             <div className="flex flex-col items-center justify-center p-8 h-full">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" aria-hidden="true" />
                 <p className="mt-2 text-sm text-muted-foreground">Loading memories...</p>
             </div>
         )
@@ -202,8 +335,8 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                 </div>
                 <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                     <DialogTrigger asChild>
-                        <Button size="sm">
-                            <Plus className="h-4 w-4 mr-1" /> Add
+                        <Button type="button" size="sm">
+                            <Plus className="h-4 w-4 mr-1" aria-hidden="true" /> Add memory
                         </Button>
                     </DialogTrigger>
                     <DialogContent className="sm:max-w-[500px]">
@@ -215,16 +348,16 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                         </DialogHeader>
                         <div className="space-y-4 pt-4">
                             <div className="grid gap-2">
-                                <Label>Type</Label>
+                                <Label htmlFor="memory-type">Type</Label>
                                 <Select value={type} onValueChange={(v) => setType(v as MemoryType)}>
-                                    <SelectTrigger>
+                                    <SelectTrigger id="memory-type">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
                                         {MEMORY_TYPES.map((t) => (
                                             <SelectItem key={t.value} value={t.value}>
                                                 <span className="flex items-center gap-2">
-                                                    <span>{t.icon}</span>
+                                                    <MemoryTypeIcon type={t.value} className="h-4 w-4" />
                                                     <span>{t.label}</span>
                                                 </span>
                                             </SelectItem>
@@ -267,7 +400,7 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                                         />
                                     </div>
                                     <p className="text-xs text-muted-foreground">
-                                        Use a public http or https URL. Direct uploads are not connected yet.
+                                        Paste a public http or https link to the photo, video, or document.
                                     </p>
                                 </div>
                             )}
@@ -304,6 +437,7 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                             </div>
 
                             <Button
+                                type="button"
                                 className="w-full"
                                 onClick={handleAddMemory}
                                 disabled={!title || (type !== "note" && !fileUrl) || isAdding}
@@ -322,10 +456,22 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
                     <TabsList className="grid w-full grid-cols-5 h-8">
                         <TabsTrigger value="all" className="text-xs">All</TabsTrigger>
-                        <TabsTrigger value="photo" className="text-xs">📷</TabsTrigger>
-                        <TabsTrigger value="video" className="text-xs">🎬</TabsTrigger>
-                        <TabsTrigger value="note" className="text-xs">📝</TabsTrigger>
-                        <TabsTrigger value="document" className="text-xs">📄</TabsTrigger>
+                        <TabsTrigger value="photo" className="text-xs" aria-label="Photos">
+                            <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                            <span className="sr-only">Photos</span>
+                        </TabsTrigger>
+                        <TabsTrigger value="video" className="text-xs" aria-label="Videos">
+                            <Video className="h-3.5 w-3.5" aria-hidden="true" />
+                            <span className="sr-only">Videos</span>
+                        </TabsTrigger>
+                        <TabsTrigger value="note" className="text-xs" aria-label="Notes">
+                            <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+                            <span className="sr-only">Notes</span>
+                        </TabsTrigger>
+                        <TabsTrigger value="document" className="text-xs" aria-label="Documents">
+                            <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+                            <span className="sr-only">Documents</span>
+                        </TabsTrigger>
                     </TabsList>
                 </Tabs>
             </div>
@@ -340,28 +486,34 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                 ) : (
                     <div className="grid grid-cols-2 gap-3">
                         {filteredMemories.map((memory) => {
-                            const Icon = typeIcons[memory.type as keyof typeof typeIcons] || FileText
-                            const typeInfo = getMemoryTypeInfo(memory.type as MemoryType)
-
                             return (
                                 <Card
                                     key={memory.id}
-                                    className="overflow-hidden cursor-pointer hover:shadow-md transition-shadow group"
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-label={`View memory: ${memory.title}`}
+                                    className="group cursor-pointer overflow-hidden transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                     onClick={() => setSelectedMemory(memory)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                            event.preventDefault()
+                                            setSelectedMemory(memory)
+                                        }
+                                    }}
                                 >
-                                    {memory.type === "photo" && memory.fileUrl ? (
+                                    {memory.type === "photo" && isSafeExternalUrl(memory.fileUrl) ? (
                                         // eslint-disable-next-line @next/next/no-img-element
-                                        <img src={memory.fileUrl} alt="" className="aspect-square w-full object-cover" />
+                                        <img src={memory.fileUrl} alt={memory.title} className="aspect-square w-full object-cover" />
                                     ) : (
                                         <div className="aspect-square bg-muted flex items-center justify-center">
-                                            <Icon className="h-8 w-8 text-muted-foreground" />
+                                            <MemoryTypeIcon type={memory.type as MemoryType} className="h-8 w-8 text-muted-foreground" />
                                         </div>
                                     )}
                                     <CardContent className="p-2">
                                         <p className="font-medium text-sm truncate">{memory.title}</p>
                                         <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-                                            <span>{typeInfo.icon}</span>
-                                            {format(new Date(memory.date), "MMM d")}
+                                            <MemoryTypeIcon type={memory.type as MemoryType} className="h-3.5 w-3.5" />
+                                            {formatDateOnly(memory.date)}
                                         </p>
                                     </CardContent>
                                 </Card>
@@ -372,18 +524,19 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
             </ScrollArea>
 
             {/* Memory Detail Modal */}
-            <Dialog open={!!selectedMemory} onOpenChange={() => setSelectedMemory(null)}>
+            <Dialog open={!!selectedMemory} onOpenChange={(open) => { if (!open) setSelectedMemory(null) }}>
                 <DialogContent className="sm:max-w-[600px]">
                     {selectedMemory && (
                         <>
                             <DialogHeader>
                                 <DialogTitle className="flex items-center gap-2">
-                                    <span>{getMemoryTypeInfo(selectedMemory.type as MemoryType).icon}</span>
+                                    <MemoryTypeIcon type={selectedMemory.type as MemoryType} className="h-4 w-4" />
+                                    <span className="sr-only">{getMemoryTypeInfo(selectedMemory.type as MemoryType).label}</span>
                                     {selectedMemory.title}
                                 </DialogTitle>
                             </DialogHeader>
                             <div className="space-y-4">
-                                {selectedMemory.type === "photo" && selectedMemory.fileUrl && (
+                                {selectedMemory.type === "photo" && isSafeExternalUrl(selectedMemory.fileUrl) && (
                                     // eslint-disable-next-line @next/next/no-img-element
                                     <img
                                         src={selectedMemory.fileUrl}
@@ -391,12 +544,24 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                                         className="aspect-video w-full rounded-lg object-cover"
                                     />
                                 )}
-                                {selectedMemory.type === "video" && selectedMemory.fileUrl && (
+                                {selectedMemory.type === "video" && isSafeExternalUrl(selectedMemory.fileUrl) && (
                                     <video
                                         src={selectedMemory.fileUrl}
                                         controls
+                                        aria-label={selectedMemory.title}
                                         className="w-full rounded-lg"
                                     />
+                                )}
+                                {selectedMemory.type === "document" && isSafeExternalUrl(selectedMemory.fileUrl) && (
+                                    <a
+                                        href={selectedMemory.fileUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex items-center justify-between rounded-lg border bg-muted/40 p-4 text-sm font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    >
+                                        <span>Open document</span>
+                                        <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                                    </a>
                                 )}
                                 {selectedMemory.type === "note" && selectedMemory.content && (
                                     <div className="p-4 bg-muted rounded-lg whitespace-pre-wrap">
@@ -410,12 +575,12 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
 
                                 <div className="flex items-center gap-4 text-sm text-muted-foreground">
                                     <span className="flex items-center gap-1">
-                                        <Calendar className="h-4 w-4" />
-                                        {format(new Date(selectedMemory.date), "MMMM d, yyyy")}
+                                        <Calendar className="h-4 w-4" aria-hidden="true" />
+                                        {formatDateOnly(selectedMemory.date, { month: "long" })}
                                     </span>
                                     {selectedMemory.location && (
                                         <span className="flex items-center gap-1">
-                                            <MapPin className="h-4 w-4" />
+                                            <MapPin className="h-4 w-4" aria-hidden="true" />
                                             {selectedMemory.location}
                                         </span>
                                     )}
@@ -423,11 +588,13 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
 
                                 <div className="flex justify-end">
                                     <Button
+                                        type="button"
                                         variant="destructive"
                                         size="sm"
                                         onClick={() => handleDeleteMemory(selectedMemory.id)}
+                                        aria-label={`Delete memory: ${selectedMemory.title}`}
                                     >
-                                        <Trash2 className="h-4 w-4 mr-1" />
+                                        <Trash2 className="h-4 w-4 mr-1" aria-hidden="true" />
                                         Delete
                                     </Button>
                                 </div>

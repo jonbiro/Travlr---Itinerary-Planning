@@ -1,22 +1,24 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import {
     Activity,
     AlertCircle,
     ArrowRight,
-    Clock,
+    Database,
     Flag,
     Globe,
     Loader2,
+    LogIn,
     MapPin,
     Plane,
     RefreshCw,
+    ShieldCheck,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 
 export interface StatsTrip {
@@ -30,7 +32,12 @@ export interface TravelStats {
     totalDestinations: number
     totalDaysPlanned: number
     totalActivities: number
-    topDestinations: { name: string; visits: number }[]
+    topDestinations: { name: string; tripCount: number }[]
+}
+
+export type StatsLoadError = {
+    kind: "auth" | "setup" | "generic"
+    message: string
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -48,9 +55,9 @@ function asOptionalString(value: unknown): string | null {
 
 function normalizeTrip(value: unknown): StatsTrip | null {
     const record = asRecord(value)
-    if (!record) return null
+    if (!record || !Array.isArray(record.days)) return null
 
-    const days = Array.isArray(record.days) ? record.days : []
+    const days = record.days
     const activityCount = days.reduce((total, day) => {
         const dayRecord = asRecord(day)
         return total + (Array.isArray(dayRecord?.activities) ? dayRecord.activities.length : 0)
@@ -85,7 +92,7 @@ export function normalizeTrips(payload: unknown): StatsTrip[] {
 }
 
 export function deriveTravelStats(trips: StatsTrip[]): TravelStats {
-    const destinations = new Map<string, { name: string; visits: number }>()
+    const destinations = new Map<string, { name: string; tripCount: number }>()
 
     for (const trip of trips) {
         if (!trip.destination) continue
@@ -94,9 +101,9 @@ export function deriveTravelStats(trips: StatsTrip[]): TravelStats {
         const existing = destinations.get(key)
 
         if (existing) {
-            existing.visits += 1
+            existing.tripCount += 1
         } else {
-            destinations.set(key, { name: trip.destination, visits: 1 })
+            destinations.set(key, { name: trip.destination, tripCount: 1 })
         }
     }
 
@@ -106,7 +113,7 @@ export function deriveTravelStats(trips: StatsTrip[]): TravelStats {
         totalDaysPlanned: trips.reduce((total, trip) => total + trip.dayCount, 0),
         totalActivities: trips.reduce((total, trip) => total + trip.activityCount, 0),
         topDestinations: Array.from(destinations.values())
-            .sort((a, b) => b.visits - a.visits || a.name.localeCompare(b.name))
+            .sort((a, b) => b.tripCount - a.tripCount || a.name.localeCompare(b.name))
             .slice(0, 5),
     }
 }
@@ -129,31 +136,6 @@ function StatCard({ icon, label, value, description, className }: StatCardProps)
             <CardContent>
                 <div className="text-2xl font-bold">{value}</div>
                 {description && <p className="mt-1 text-xs text-muted-foreground">{description}</p>}
-            </CardContent>
-        </Card>
-    )
-}
-
-function UnavailableMetric({
-    icon,
-    label,
-    description,
-    className,
-}: {
-    icon: React.ReactNode
-    label: string
-    description: string
-    className?: string
-}) {
-    return (
-        <Card className={cn("border-dashed", className)}>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardDescription className="text-sm">{label}</CardDescription>
-                {icon}
-            </CardHeader>
-            <CardContent>
-                <CardTitle className="text-3xl font-bold">—</CardTitle>
-                <p className="mt-2 text-sm text-muted-foreground">{description}</p>
             </CardContent>
         </Card>
     )
@@ -184,6 +166,42 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
     )
 }
 
+function AccessState({ error, onRetry }: { error: StatsLoadError; onRetry: () => void }) {
+    const isAuth = error.kind === "auth"
+    const isSetup = error.kind === "setup"
+
+    return (
+        <div className="mx-auto flex min-h-64 max-w-xl flex-col items-center justify-center rounded-xl border border-dashed p-8 text-center" role="alert">
+            <div className="rounded-full bg-primary/10 p-3 text-primary">
+                {isAuth ? <ShieldCheck className="h-6 w-6" /> : <Database className="h-6 w-6" />}
+            </div>
+            <h2 className="mt-4 text-lg font-semibold">
+                {isAuth ? "Sign in to see your stats" : isSetup ? "Travlr needs a little setup" : "Stats are temporarily unavailable"}
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">{error.message}</p>
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+                {isAuth && (
+                    <Button asChild>
+                        <Link href="/api/auth/signin?callbackUrl=%2Fstats">
+                            <LogIn className="h-4 w-4" />
+                            Sign in
+                        </Link>
+                    </Button>
+                )}
+                <Button type="button" variant={isAuth ? "outline" : "default"} onClick={onRetry}>
+                    <RefreshCw className="h-4 w-4" />
+                    Try again
+                </Button>
+                {isAuth && (
+                    <Button asChild type="button" variant="ghost">
+                        <Link href="/">Back home</Link>
+                    </Button>
+                )}
+            </div>
+        </div>
+    )
+}
+
 function EmptyState() {
     return (
         <div className="mx-auto flex min-h-64 max-w-xl flex-col items-center justify-center rounded-xl border border-dashed p-8 text-center">
@@ -207,53 +225,93 @@ function EmptyState() {
 export function TravelStatsDashboard() {
     const [trips, setTrips] = useState<StatsTrip[]>([])
     const [isLoading, setIsLoading] = useState(true)
-    const [error, setError] = useState<string | null>(null)
+    const [error, setError] = useState<StatsLoadError | null>(null)
+    const requestRef = useRef<AbortController | null>(null)
 
-    const loadTrips = useCallback(async (signal?: AbortSignal) => {
+    const loadTrips = useCallback(async () => {
+        requestRef.current?.abort()
+        const controller = new AbortController()
+        requestRef.current = controller
         setIsLoading(true)
         setError(null)
 
         try {
             const response = await fetch("/api/trips", {
                 cache: "no-store",
-                signal,
+                signal: controller.signal,
             })
             const payload: unknown = await response.json().catch(() => null)
 
             if (!response.ok) {
-                const responseMessage = asRecord(payload)?.error
-                throw new Error(
-                    typeof responseMessage === "string" && responseMessage.trim()
-                        ? responseMessage
-                        : "We couldn’t load your trips right now.",
-                )
+                const record = asRecord(payload)
+                const responseMessage = typeof record?.error === "string" && record.error.trim()
+                    ? record.error
+                    : "We couldn’t load your trips right now."
+                const code = typeof record?.code === "string" ? record.code : ""
+                const lowerMessage = responseMessage.toLowerCase()
+                const kind: StatsLoadError["kind"] = response.status === 503
+                    || code === "DATABASE_NOT_CONFIGURED"
+                    || lowerMessage.includes("database is not configured")
+                    ? "setup"
+                    : response.status === 401
+                        || code === "AUTH_REQUIRED"
+                        || code === "AUTH_NOT_CONFIGURED"
+                        || record?.authConfigured === false
+                        ? (code === "AUTH_NOT_CONFIGURED" || record?.authConfigured === false ? "setup" : "auth")
+                        : "generic"
+
+                throw {
+                    kind,
+                    message: kind === "setup" && (response.status === 503 || code === "DATABASE_NOT_CONFIGURED" || lowerMessage.includes("database is not configured"))
+                        ? "Connect a database to load and save trips in this environment."
+                        : kind === "setup"
+                            ? "Sign-in is not configured for this environment yet."
+                            : kind === "auth"
+                                ? "Sign in to view your private travel stats."
+                                : responseMessage,
+                } satisfies StatsLoadError
             }
 
             const normalizedTrips = normalizeTrips(payload)
-            if (signal?.aborted) return
+            if (controller.signal.aborted) return
 
             setTrips(normalizedTrips)
         } catch (loadError) {
-            if (signal?.aborted || (loadError instanceof Error && loadError.name === "AbortError")) return
+            if (controller.signal.aborted || (loadError instanceof Error && loadError.name === "AbortError")) return
 
             setTrips([])
-            setError(loadError instanceof Error ? loadError.message : "We couldn’t load your trips right now.")
+            setError(
+                typeof loadError === "object" && loadError !== null && "kind" in loadError && "message" in loadError
+                    ? loadError as StatsLoadError
+                    : {
+                        kind: "generic",
+                        message: loadError instanceof Error ? loadError.message : "We couldn’t load your trips right now.",
+                    },
+            )
         } finally {
-            if (!signal?.aborted) setIsLoading(false)
+            if (requestRef.current === controller) {
+                requestRef.current = null
+                setIsLoading(false)
+            }
         }
     }, [])
 
     useEffect(() => {
-        const controller = new AbortController()
-        void loadTrips(controller.signal)
+        void loadTrips()
 
-        return () => controller.abort()
+        return () => {
+            requestRef.current?.abort()
+            requestRef.current = null
+        }
     }, [loadTrips])
 
     const stats = useMemo(() => deriveTravelStats(trips), [trips])
 
     if (isLoading) return <LoadingState />
-    if (error) return <ErrorState message={error} onRetry={() => void loadTrips()} />
+    if (error) {
+        if (error.kind !== "generic") return <AccessState error={error} onRetry={() => void loadTrips()} />
+        return <ErrorState message={error.message} onRetry={() => void loadTrips()} />
+    }
     if (trips.length === 0) return <EmptyState />
 
     return (
@@ -292,19 +350,6 @@ export function TravelStatsDashboard() {
                 />
             </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <UnavailableMetric
-                    icon={<Globe className="h-4 w-4 text-blue-500" />}
-                    label="Total Distance"
-                    description="Distance data will appear once trip routes are recorded."
-                />
-                <UnavailableMetric
-                    icon={<Clock className="h-4 w-4 text-orange-500" />}
-                    label="Flight Time"
-                    description="Flight details will appear once flights are added to a trip."
-                />
-            </div>
-
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-sm font-medium">
@@ -331,7 +376,7 @@ export function TravelStatsDashboard() {
                                         <span className="font-medium">{destination.name}</span>
                                     </div>
                                     <span className="text-sm text-muted-foreground">
-                                        {destination.visits} {destination.visits === 1 ? "trip" : "trips"}
+                                        {destination.tripCount} {destination.tripCount === 1 ? "planned trip" : "planned trips"}
                                     </span>
                                 </div>
                             ))}

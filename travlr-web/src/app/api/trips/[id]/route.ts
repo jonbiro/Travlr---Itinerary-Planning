@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server"
 import { getPrismaClient } from "@/lib/prisma"
 import { getCurrentUser, unauthorizedResponse } from "@/lib/current-user"
+import { consumeRateLimitAsync, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit"
 import { updateTripSchema } from "@/lib/validators/trip-update"
 import { JSON_BODY_LIMITS, jsonBodyErrorResponse, readJsonBody } from "@/lib/request-json"
+import { inclusiveUtcDayCount, PRODUCT_LIMITS } from "@/lib/product-limits"
 import { z } from "zod"
 
 function databaseUnavailable() {
@@ -33,22 +35,49 @@ export async function GET(
                     { members: { some: { userId: currentUser.id } } },
                 ],
             },
-            include: {
+            select: {
+                id: true,
+                name: true,
+                tripName: true,
+                destination: true,
+                startDate: true,
+                endDate: true,
+                imgUrl: true,
+                theme: true,
+                budget: true,
+                currency: true,
+                userId: true,
+                createdAt: true,
+                updatedAt: true,
                 days: {
-                    include: {
+                    select: {
+                        id: true,
+                        tripId: true,
+                        date: true,
+                        dayNumber: true,
+                        theme: true,
                         activities: {
-                            orderBy: {
-                                order: 'asc'
-                            }
-                        }
+                            select: {
+                                id: true,
+                                dayId: true,
+                                name: true,
+                                description: true,
+                                startTime: true,
+                                endTime: true,
+                                location: true,
+                                lat: true,
+                                lng: true,
+                                order: true,
+                                placeId: true,
+                            },
+                            orderBy: { order: "asc" },
+                            take: PRODUCT_LIMITS.maxActivitiesPerDay,
+                        },
                     },
-                    orderBy: {
-                        dayNumber: 'asc'
-                    }
+                    orderBy: { dayNumber: "asc" },
+                    take: PRODUCT_LIMITS.maxTripDays,
                 },
-                expenses: true,
-                // Add other includes as needed
-            }
+            },
         })
 
         if (!trip) {
@@ -72,6 +101,13 @@ export async function PATCH(
 
         const prisma = getPrismaClient()
         if (!prisma) return databaseUnavailable()
+
+        const mutationLimit = await consumeRateLimitAsync(
+            `mutation:${currentUser.id}`,
+            RATE_LIMITS.mutation,
+            prisma,
+        )
+        if (!mutationLimit.allowed) return rateLimitResponse(mutationLimit)
 
         const { id } = await params
         const json = await readJsonBody(req, JSON_BODY_LIMITS.trip)
@@ -97,6 +133,15 @@ export async function PATCH(
                 { status: 400 },
             )
         }
+        if (effectiveStartDate && effectiveEndDate && inclusiveUtcDayCount(effectiveStartDate, effectiveEndDate) > PRODUCT_LIMITS.maxTripDays) {
+            return NextResponse.json(
+                {
+                    error: "Invalid trip data",
+                    issues: [{ path: ["endDate"], message: `Trips longer than ${PRODUCT_LIMITS.maxTripDays} days are not supported.` }],
+                },
+                { status: 400 },
+            )
+        }
 
         const trip = await prisma.trip.update({
             where: {
@@ -109,13 +154,49 @@ export async function PATCH(
                 endDate: body.endDate,
                 budget: body.budget
             },
-            include: {
+            select: {
+                id: true,
+                name: true,
+                tripName: true,
+                destination: true,
+                startDate: true,
+                endDate: true,
+                imgUrl: true,
+                theme: true,
+                budget: true,
+                currency: true,
+                userId: true,
                 days: {
-                    include: {
-                        activities: true
-                    }
-                }
-            }
+                    select: {
+                        id: true,
+                        tripId: true,
+                        date: true,
+                        dayNumber: true,
+                        theme: true,
+                        activities: {
+                            select: {
+                                id: true,
+                                dayId: true,
+                                name: true,
+                                description: true,
+                                startTime: true,
+                                endTime: true,
+                                location: true,
+                                lat: true,
+                                lng: true,
+                                order: true,
+                                placeId: true,
+                            },
+                            orderBy: { order: "asc" },
+                            take: PRODUCT_LIMITS.maxActivitiesPerDay,
+                        },
+                    },
+                    orderBy: { dayNumber: "asc" },
+                    take: PRODUCT_LIMITS.maxTripDays,
+                },
+                createdAt: true,
+                updatedAt: true,
+            },
         })
 
         return NextResponse.json(trip)
@@ -138,6 +219,13 @@ export async function DELETE(
 
         const prisma = getPrismaClient()
         if (!prisma) return databaseUnavailable()
+
+        const mutationLimit = await consumeRateLimitAsync(
+            `mutation:${currentUser.id}`,
+            RATE_LIMITS.mutation,
+            prisma,
+        )
+        if (!mutationLimit.allowed) return rateLimitResponse(mutationLimit)
 
         const { id } = await params
 
