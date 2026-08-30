@@ -1,6 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { isDemoMode } from "./current-user"
+
+beforeEach(() => {
+    vi.stubEnv("TRAVLR_DEMO_MODE", "")
+    vi.stubEnv("NEXTAUTH_SECRET", "")
+    vi.stubEnv("GOOGLE_CLIENT_ID", "")
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "")
+})
 
 afterEach(() => {
     vi.unstubAllEnvs()
