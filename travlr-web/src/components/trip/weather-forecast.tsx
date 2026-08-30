@@ -38,30 +38,61 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
     const [forecast, setForecast] = useState<WeatherForecast | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const hasDestination = Boolean(destination?.trim())
 
     useEffect(() => {
-        if (!destination) return
+        const location = destination?.trim()
+        if (!location) {
+            setForecast(null)
+            setError(null)
+            setIsLoading(false)
+            return
+        }
+        const requestedLocation: string = location
+
+        const controller = new AbortController()
+        let isCurrentRequest = true
 
         async function fetchWeather() {
             setIsLoading(true)
             setError(null)
+            setForecast(null)
             try {
-                const response = await fetch(`/api/weather?location=${encodeURIComponent(destination as string)}`)
-                if (!response.ok) throw new Error('Failed to fetch weather')
-                const data = await response.json()
-                setForecast(data)
-            } catch (err) {
-                setError('Could not load weather forecast')
-                console.error(err)
+                const response = await fetch(`/api/weather?location=${encodeURIComponent(requestedLocation)}`, {
+                    signal: controller.signal,
+                })
+                const payload = await response.json().catch(() => null) as unknown
+
+                if (!response.ok) {
+                    const serverMessage = isWeatherErrorPayload(payload) ? payload.error : null
+                    throw new Error(
+                        serverMessage || 'Could not load the weather forecast right now.',
+                    )
+                }
+
+                if (isCurrentRequest) setForecast(payload as WeatherForecast)
+            } catch (requestError) {
+                if (controller.signal.aborted || !isCurrentRequest) return
+
+                setError(
+                    requestError instanceof Error
+                        ? requestError.message
+                        : 'Could not load the weather forecast right now.',
+                )
             } finally {
-                setIsLoading(false)
+                if (isCurrentRequest) setIsLoading(false)
             }
         }
 
         fetchWeather()
+
+        return () => {
+            isCurrentRequest = false
+            controller.abort()
+        }
     }, [destination])
 
-    if (!destination) {
+    if (!hasDestination) {
         return (
             <div className="flex flex-col items-center justify-center p-8 text-center space-y-4 h-full">
                 <Cloud className="h-12 w-12 text-muted-foreground opacity-50" />
@@ -81,7 +112,7 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
 
     if (error) {
         return (
-            <div className="flex flex-col items-center justify-center p-8 text-center">
+            <div className="flex flex-col items-center justify-center p-8 text-center" role="alert">
                 <p className="text-destructive">{error}</p>
             </div>
         )
@@ -162,5 +193,15 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
                 </ScrollArea>
             </div>
         </div>
+    )
+}
+
+function isWeatherErrorPayload(value: unknown): value is { error: string } {
+    return (
+        typeof value === 'object'
+        && value !== null
+        && 'error' in value
+        && typeof value.error === 'string'
+        && value.error.trim().length > 0
     )
 }

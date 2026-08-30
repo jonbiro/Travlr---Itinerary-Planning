@@ -1,7 +1,6 @@
 "use client"
 
-import Image from "next/image"
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect } from "react"
 import {
     Camera,
     FileText,
@@ -11,8 +10,7 @@ import {
     Trash2,
     Loader2,
     Calendar,
-    MapPin,
-    Upload
+    MapPin
 } from "lucide-react"
 import { format } from "date-fns"
 
@@ -59,7 +57,8 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
     const [dialogOpen, setDialogOpen] = useState(false)
     const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null)
     const [activeTab, setActiveTab] = useState<string>("all")
-    const fileInputRef = useRef<HTMLInputElement>(null)
+    const [formError, setFormError] = useState<string | null>(null)
+    const [error, setError] = useState<string | null>(null)
 
     // Form state
     const [title, setTitle] = useState("")
@@ -76,14 +75,14 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
 
         async function loadMemories() {
             setIsLoading(true)
+            setError(null)
             try {
                 const res = await fetch(`/api/trip/memories?tripId=${tripId}`)
-                if (res.ok) {
-                    const data = await res.json()
-                    setMemories(data.memories || [])
-                }
-            } catch (error) {
-                console.error("Failed to load memories:", error)
+                const data = await res.json().catch(() => null)
+                if (!res.ok) throw new Error(data?.error || "Unable to load memories")
+                setMemories(data.memories || [])
+            } catch (loadError) {
+                setError(loadError instanceof Error ? loadError.message : "Unable to load memories")
             } finally {
                 setIsLoading(false)
             }
@@ -104,12 +103,24 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
         setLocation("")
         setContent("")
         setFileUrl("")
+        setFormError(null)
     }
 
     async function handleAddMemory() {
         if (!tripId || !title) return
 
+        if (type !== "note") {
+            try {
+                const url = new URL(fileUrl)
+                if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error()
+            } catch {
+                setFormError("Add a valid public http or https file URL.")
+                return
+            }
+        }
+
         setIsAdding(true)
+        setFormError(null)
         try {
             const res = await fetch("/api/trip/memories", {
                 method: "POST",
@@ -126,31 +137,35 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                 }),
             })
 
-            if (res.ok) {
-                const newMemory = await res.json()
-                setMemories([newMemory, ...memories])
-                resetForm()
-                setDialogOpen(false)
+            if (!res.ok) {
+                const payload = await res.json().catch(() => null)
+                throw new Error(payload?.error || "Unable to save this memory")
             }
+
+            const newMemory = await res.json()
+            setMemories([newMemory, ...memories])
+            resetForm()
+            setDialogOpen(false)
         } catch (error) {
-            console.error("Failed to add memory:", error)
+            setFormError(error instanceof Error ? error.message : "Unable to save this memory")
         } finally {
             setIsAdding(false)
         }
     }
 
     async function handleDeleteMemory(memoryId: string) {
+        setError(null)
         try {
             const res = await fetch(`/api/trip/memories?id=${memoryId}`, {
                 method: "DELETE",
             })
 
-            if (res.ok) {
-                setMemories(memories.filter(m => m.id !== memoryId))
-                setSelectedMemory(null)
-            }
-        } catch (error) {
-            console.error("Failed to delete memory:", error)
+            const payload = await res.json().catch(() => null)
+            if (!res.ok) throw new Error(payload?.error || "Unable to delete memory")
+            setMemories(memories.filter(m => m.id !== memoryId))
+            setSelectedMemory(null)
+        } catch (deleteError) {
+            setError(deleteError instanceof Error ? deleteError.message : "Unable to delete memory")
         }
     }
 
@@ -174,6 +189,11 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
 
     return (
         <div className="flex flex-col h-full">
+            {error && (
+                <p className="m-4 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive" role="alert">
+                    {error}
+                </p>
+            )}
             {/* Header */}
             <div className="p-4 border-b flex items-center justify-between">
                 <div>
@@ -245,30 +265,10 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                                             onChange={(e) => setFileUrl(e.target.value)}
                                             className="flex-1"
                                         />
-                                        <Button
-                                            variant="outline"
-                                            size="icon"
-                                            onClick={() => fileInputRef.current?.click()}
-                                        >
-                                            <Upload className="h-4 w-4" />
-                                        </Button>
                                     </div>
                                     <p className="text-xs text-muted-foreground">
-                                        Paste a URL or upload from your device
+                                        Use a public http or https URL. Direct uploads are not connected yet.
                                     </p>
-                                    <input
-                                        ref={fileInputRef}
-                                        type="file"
-                                        accept="image/*,video/*,.pdf,.doc,.docx"
-                                        className="hidden"
-                                        onChange={(e) => {
-                                            // In production, this would upload to cloud storage
-                                            const file = e.target.files?.[0]
-                                            if (file) {
-                                                setFileUrl(`local://${file.name}`)
-                                            }
-                                        }}
-                                    />
                                 </div>
                             )}
 
@@ -306,11 +306,12 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                             <Button
                                 className="w-full"
                                 onClick={handleAddMemory}
-                                disabled={!title || isAdding}
+                                disabled={!title || (type !== "note" && !fileUrl) || isAdding}
                             >
                                 {isAdding && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                                 Add Memory
                             </Button>
+                            {formError && <p className="text-sm text-destructive">{formError}</p>}
                         </div>
                     </DialogContent>
                 </Dialog>
@@ -349,10 +350,8 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                                     onClick={() => setSelectedMemory(memory)}
                                 >
                                     {memory.type === "photo" && memory.fileUrl ? (
-                                        <div
-                                            className="aspect-square bg-cover bg-center"
-                                            style={{ backgroundImage: `url(${memory.fileUrl})` }}
-                                        />
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img src={memory.fileUrl} alt="" className="aspect-square w-full object-cover" />
                                     ) : (
                                         <div className="aspect-square bg-muted flex items-center justify-center">
                                             <Icon className="h-8 w-8 text-muted-foreground" />
@@ -385,14 +384,12 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                             </DialogHeader>
                             <div className="space-y-4">
                                 {selectedMemory.type === "photo" && selectedMemory.fileUrl && (
-                                    <div className="relative w-full aspect-video">
-                                        <Image
-                                            src={selectedMemory.fileUrl}
-                                            alt={selectedMemory.title}
-                                            fill
-                                            className="object-cover rounded-lg"
-                                        />
-                                    </div>
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                        src={selectedMemory.fileUrl}
+                                        alt={selectedMemory.title}
+                                        className="aspect-video w-full rounded-lg object-cover"
+                                    />
                                 )}
                                 {selectedMemory.type === "video" && selectedMemory.fileUrl && (
                                     <video

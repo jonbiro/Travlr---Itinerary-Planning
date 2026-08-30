@@ -1,3 +1,14 @@
 
 tmp/sockets/
+tmp/cache/
+tmp/pids/
+tmp/restart.txt
+tmp/development_secret.txt
 .idea
+config/master.key
+config/credentials.yml.enc
+.env
+.env.*
+!travlr/.env.example
+!travlr-web/.env.example
+node_modules/

@@ -56,16 +56,17 @@ export function CreateTripForm({ onSuccess }: { onSuccess?: (data: any) => void 
                 body: JSON.stringify(data),
             })
 
-            if (!response.ok) throw new Error("Failed to generate trip")
+            if (!response.ok) {
+                const payload = await response.json().catch(() => null)
+                throw new Error(payload?.error || "Failed to generate trip")
+            }
 
             const tripData = await response.json()
-            console.log("Generated Trip:", tripData)
             toast.success("Trip generated successfully!")
 
             if (onSuccess) onSuccess(tripData)
         } catch (error) {
-            console.error(error)
-            toast.error("Something went wrong. Please try again.")
+            toast.error(error instanceof Error ? error.message : "Something went wrong. Please try again.")
         } finally {
             setIsLoading(false)
         }

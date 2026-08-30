@@ -40,6 +40,7 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
     const [isLoading, setIsLoading] = useState(false)
     const [isAddingExpense, setIsAddingExpense] = useState(false)
     const [dialogOpen, setDialogOpen] = useState(false)
+    const [error, setError] = useState<string | null>(null)
 
     // Form state
     const [amount, setAmount] = useState("")
@@ -53,14 +54,14 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
 
         async function loadExpenses() {
             setIsLoading(true)
+            setError(null)
             try {
                 const res = await fetch(`/api/trip/expenses?tripId=${tripId}`)
-                if (res.ok) {
-                    const data = await res.json()
-                    setExpenses(data.expenses || [])
-                }
-            } catch (error) {
-                console.error("Failed to load expenses:", error)
+                const data = await res.json().catch(() => null)
+                if (!res.ok) throw new Error(data?.error || "Unable to load expenses")
+                setExpenses(data.expenses || [])
+            } catch (loadError) {
+                setError(loadError instanceof Error ? loadError.message : "Unable to load expenses")
             } finally {
                 setIsLoading(false)
             }
@@ -75,6 +76,7 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
         if (!tripId || !amount) return
 
         setIsAddingExpense(true)
+        setError(null)
         try {
             const res = await fetch("/api/trip/expenses", {
                 method: "POST",
@@ -89,33 +91,33 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
                 }),
             })
 
-            if (res.ok) {
-                const newExpense = await res.json()
-                setExpenses([newExpense, ...expenses])
-                // Reset form
-                setAmount("")
-                setDescription("")
-                setCategory("food")
-                setDialogOpen(false)
-            }
-        } catch (error) {
-            console.error("Failed to add expense:", error)
+            const payload = await res.json().catch(() => null)
+            if (!res.ok) throw new Error(payload?.error || "Unable to add expense")
+
+            setExpenses([payload, ...expenses])
+            setAmount("")
+            setDescription("")
+            setCategory("food")
+            setDialogOpen(false)
+        } catch (addError) {
+            setError(addError instanceof Error ? addError.message : "Unable to add expense")
         } finally {
             setIsAddingExpense(false)
         }
     }
 
     async function handleDeleteExpense(expenseId: string) {
+        setError(null)
         try {
             const res = await fetch(`/api/trip/expenses?id=${expenseId}`, {
                 method: "DELETE",
             })
 
-            if (res.ok) {
-                setExpenses(expenses.filter(e => e.id !== expenseId))
-            }
-        } catch (error) {
-            console.error("Failed to delete expense:", error)
+            const payload = await res.json().catch(() => null)
+            if (!res.ok) throw new Error(payload?.error || "Unable to delete expense")
+            setExpenses(expenses.filter(e => e.id !== expenseId))
+        } catch (deleteError) {
+            setError(deleteError instanceof Error ? deleteError.message : "Unable to delete expense")
         }
     }
 
@@ -139,6 +141,11 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
 
     return (
         <div className="flex flex-col h-full p-4 space-y-4">
+            {error && (
+                <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive" role="alert">
+                    {error}
+                </p>
+            )}
             {/* Budget Overview Card */}
             <Card className={cn(
                 "transition-colors",

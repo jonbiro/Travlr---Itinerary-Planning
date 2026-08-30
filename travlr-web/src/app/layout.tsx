@@ -39,6 +39,10 @@ export const metadata: Metadata = {
     title: "Travlr - AI Travel Planner",
     description: "Plan your perfect trip with AI-powered itinerary generation",
   },
+  icons: {
+    icon: "/icons/icon-192x192.png",
+    apple: "/icons/icon-192x192.png",
+  },
 };
 
 export const viewport: Viewport = {

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
+import { ensureDemoUser, getPrismaClient } from "@/lib/prisma"
+import { getCurrentUser, unauthorizedResponse } from "@/lib/current-user"
+import { JSON_BODY_LIMITS, jsonBodyErrorResponse, readJsonBody } from "@/lib/request-json"
 import { z } from "zod"
 
 const shareTripSchema = z.object({
@@ -7,28 +9,32 @@ const shareTripSchema = z.object({
     email: z.string().email(),
 })
 
-// Mock auth for now
-const _currentUserId = "demo-user"
-
 export async function POST(req: Request) {
     try {
-        const json = await req.json()
-        const body = shareTripSchema.parse(json)
+        const currentUser = await getCurrentUser()
+        if (!currentUser) return unauthorizedResponse()
 
-        // 1. Verify trip exists and current user has access (owner or member)
-        const trip = await prisma.trip.findUnique({
-            where: { id: body.tripId },
-            include: { members: true }
+        const prisma = getPrismaClient()
+        if (!prisma) {
+            return NextResponse.json(
+                { error: "Database is not configured. Add DATABASE_URL to share trips." },
+                { status: 503 },
+            )
+        }
+        if (currentUser.isDemo) await ensureDemoUser(prisma)
+
+        const json = await readJsonBody(req, JSON_BODY_LIMITS.shareTrip)
+        if (!json.ok) return jsonBodyErrorResponse(json)
+        const body = shareTripSchema.parse(json.data)
+
+        const trip = await prisma.trip.findFirst({
+            where: { id: body.tripId, userId: currentUser.id },
         })
 
         if (!trip) {
             return new NextResponse("Trip not found", { status: 404 })
         }
 
-        // TODO: proper auth check. For now assuming if you can hit this with an ID, you might be allowed in dev.
-        // In real app, check if currentUserId is owner or in members.
-
-        // 2. Find user by email
         const userToInvite = await prisma.user.findUnique({
             where: { email: body.email }
         })
@@ -37,7 +43,10 @@ export async function POST(req: Request) {
             return new NextResponse("User not found", { status: 404 })
         }
 
-        // 3. Check if already a member
+        if (userToInvite.id === trip.userId) {
+            return new NextResponse("User already owns this trip", { status: 409 })
+        }
+
         const existingMember = await prisma.tripUser.findUnique({
             where: {
                 tripId_userId: {
@@ -51,7 +60,6 @@ export async function POST(req: Request) {
             return new NextResponse("User already a member", { status: 409 })
         }
 
-        // 4. Add to trip
         await prisma.tripUser.create({
             data: {
                 tripId: body.tripId,

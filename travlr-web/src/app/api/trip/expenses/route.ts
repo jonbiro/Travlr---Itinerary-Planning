@@ -1,91 +1,192 @@
-import { NextResponse } from 'next/server'
+import { NextResponse } from "next/server"
+import { z } from "zod"
 
-// Mock expense storage (in production, use Prisma)
-// This is a temporary in-memory store for demonstration
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockExpenses: Map<string, any[]> = new Map()
+import { getPrismaClient } from "@/lib/prisma"
+import { getCurrentUser, unauthorizedResponse } from "@/lib/current-user"
+import { JSON_BODY_LIMITS, jsonBodyErrorResponse, readJsonBody } from "@/lib/request-json"
+
+const tripIdQuerySchema = z.object({
+    tripId: z.string().trim().min(1),
+})
+
+const amountSchema = z.preprocess(
+    (value) => {
+        if (typeof value !== "string") return value
+
+        const trimmed = value.trim()
+        return trimmed ? Number(trimmed) : value
+    },
+    z.number().finite().nonnegative(),
+)
+
+const expenseSchema = z.object({
+    tripId: z.string().trim().min(1),
+    amount: amountSchema,
+    currency: z.string().trim().min(1).max(10).default("USD"),
+    category: z.enum(["food", "transport", "lodging", "activities", "shopping", "other"]),
+    description: z.string().trim().max(1_000).nullable().optional(),
+    date: z.union([
+        z.string().trim().min(1),
+        z.date(),
+    ]).pipe(z.coerce.date()),
+})
+
+const tripAccessFilter = (tripId: string, userId: string) => ({
+    id: tripId,
+    OR: [
+        { userId },
+        { members: { some: { userId } } },
+    ],
+})
+
+function databaseUnavailable() {
+    return NextResponse.json(
+        { error: "Database is not configured. Add DATABASE_URL to use expenses." },
+        { status: 503 },
+    )
+}
+
+function invalidExpenseData(error: z.ZodError) {
+    return NextResponse.json(
+        { error: "Invalid expense data", issues: error.issues },
+        { status: 400 },
+    )
+}
+
+function serializeExpense(expense: { amount: unknown }) {
+    return {
+        ...expense,
+        // Prisma returns Decimal for amounts; the client-side expense type uses a number.
+        amount: Number(expense.amount),
+    }
+}
 
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
-    const tripId = searchParams.get('tripId')
+    const parsedQuery = tripIdQuerySchema.safeParse({
+        tripId: searchParams.get("tripId"),
+    })
 
-    if (!tripId) {
+    if (!parsedQuery.success) {
         return NextResponse.json(
-            { error: 'tripId parameter is required' },
-            { status: 400 }
+            { error: "tripId parameter is required" },
+            { status: 400 },
         )
     }
 
-    // In production, use: prisma.expense.findMany({ where: { tripId } })
-    const expenses = mockExpenses.get(tripId) || []
+    try {
+        const currentUser = await getCurrentUser()
+        if (!currentUser) return unauthorizedResponse()
 
-    return NextResponse.json({ expenses })
+        const prisma = getPrismaClient()
+        if (!prisma) return databaseUnavailable()
+
+        const trip = await prisma.trip.findFirst({
+            where: tripAccessFilter(parsedQuery.data.tripId, currentUser.id),
+            select: { id: true },
+        })
+
+        if (!trip) {
+            return NextResponse.json({ error: "Trip not found" }, { status: 404 })
+        }
+
+        const expenses = await prisma.expense.findMany({
+            where: { tripId: trip.id },
+            orderBy: { createdAt: "desc" },
+        })
+
+        return NextResponse.json({ expenses: expenses.map(serializeExpense) })
+    } catch (error) {
+        console.error("[TRIP_EXPENSES_GET]", error)
+        return NextResponse.json({ error: "Failed to load expenses" }, { status: 500 })
+    }
 }
 
 export async function POST(request: Request) {
     try {
-        const body = await request.json()
-        const { tripId, amount, currency, category, description, date } = body
+        const currentUser = await getCurrentUser()
+        if (!currentUser) return unauthorizedResponse()
 
-        if (!tripId || amount === undefined || !category || !date) {
-            return NextResponse.json(
-                { error: 'Missing required fields' },
-                { status: 400 }
-            )
+        const prisma = getPrismaClient()
+        if (!prisma) return databaseUnavailable()
+
+        const json = await readJsonBody(request, JSON_BODY_LIMITS.expense)
+        if (!json.ok) return jsonBodyErrorResponse(json)
+
+        const parsed = expenseSchema.safeParse(json.data)
+        if (!parsed.success) return invalidExpenseData(parsed.error)
+
+        const trip = await prisma.trip.findFirst({
+            where: tripAccessFilter(parsed.data.tripId, currentUser.id),
+            select: { id: true },
+        })
+
+        if (!trip) {
+            return NextResponse.json({ error: "Trip not found" }, { status: 404 })
         }
 
-        // Create new expense (in production, use Prisma)
-        const newExpense = {
-            id: `exp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            tripId,
-            amount,
-            currency: currency || 'USD',
-            category,
-            description,
-            date: new Date(date),
-            createdAt: new Date(),
-            updatedAt: new Date(),
-        }
+        const expense = await prisma.expense.create({
+            data: {
+                tripId: trip.id,
+                amount: parsed.data.amount,
+                currency: parsed.data.currency,
+                category: parsed.data.category,
+                description: parsed.data.description ?? null,
+                date: parsed.data.date,
+            },
+        })
 
-        // Store in mock storage
-        const tripExpenses = mockExpenses.get(tripId) || []
-        tripExpenses.unshift(newExpense)
-        mockExpenses.set(tripId, tripExpenses)
-
-        return NextResponse.json(newExpense)
+        return NextResponse.json(serializeExpense(expense), { status: 201 })
     } catch (error) {
-        console.error('Error creating expense:', error)
-        return NextResponse.json(
-            { error: 'Failed to create expense' },
-            { status: 500 }
-        )
+        console.error("[TRIP_EXPENSES_POST]", error)
+        return NextResponse.json({ error: "Failed to create expense" }, { status: 500 })
     }
 }
 
 export async function DELETE(request: Request) {
     const { searchParams } = new URL(request.url)
-    const expenseId = searchParams.get('id')
+    const parsedQuery = z.object({ id: z.string().trim().min(1) }).safeParse({
+        id: searchParams.get("id"),
+    })
 
-    if (!expenseId) {
+    if (!parsedQuery.success) {
         return NextResponse.json(
-            { error: 'id parameter is required' },
-            { status: 400 }
+            { error: "id parameter is required" },
+            { status: 400 },
         )
     }
 
-    // In production, use: prisma.expense.delete({ where: { id: expenseId } })
-    // For mock storage, find and remove the expense
-    for (const [tripId, expenses] of mockExpenses) {
-        const index = expenses.findIndex(e => e.id === expenseId)
-        if (index !== -1) {
-            expenses.splice(index, 1)
-            mockExpenses.set(tripId, expenses)
-            return NextResponse.json({ success: true })
-        }
-    }
+    try {
+        const currentUser = await getCurrentUser()
+        if (!currentUser) return unauthorizedResponse()
 
-    return NextResponse.json(
-        { error: 'Expense not found' },
-        { status: 404 }
-    )
+        const prisma = getPrismaClient()
+        if (!prisma) return databaseUnavailable()
+
+        // Filter through the trip relation so an expense is never deleted
+        // unless its trip is owned by, or shared with, the current user.
+        const expense = await prisma.expense.findFirst({
+            where: {
+                id: parsedQuery.data.id,
+                trip: {
+                    OR: [
+                        { userId: currentUser.id },
+                        { members: { some: { userId: currentUser.id } } },
+                    ],
+                },
+            },
+            select: { id: true },
+        })
+
+        if (!expense) {
+            return NextResponse.json({ error: "Expense not found" }, { status: 404 })
+        }
+
+        await prisma.expense.delete({ where: { id: expense.id } })
+
+        return NextResponse.json({ success: true })
+    } catch (error) {
+        console.error("[TRIP_EXPENSES_DELETE]", error)
+        return NextResponse.json({ error: "Failed to delete expense" }, { status: 500 })
+    }
 }

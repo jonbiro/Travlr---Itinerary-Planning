@@ -1,122 +1,207 @@
 import { openai } from "@ai-sdk/openai"
-import { streamText, tool } from "ai"
+import { convertToModelMessages, stepCountIs, streamText, tool, type UIMessage } from "ai"
 import { z } from "zod"
+
+import { getCurrentUser, unauthorizedResponse } from "@/lib/current-user"
+import { getPrismaClient } from "@/lib/prisma"
+import {
+    itineraryChangeSchema,
+    persistItineraryChange,
+    type ItineraryChange,
+} from "@/lib/trip-itinerary"
+import { getWeatherForecast, WeatherServiceError } from "@/lib/weather-service"
+import { consumeRateLimit, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit"
+import { JSON_BODY_LIMITS, jsonBodyErrorResponse, readJsonBody } from "@/lib/request-json"
 
 export const maxDuration = 30
 
-export async function POST(req: Request) {
-    const { messages, trip } = await req.json()
+type JsonRecord = Record<string, unknown>
 
-    const result = streamText({
-        model: openai("gpt-4-turbo"),
-        messages,
-        system: `You are an expert travel assistant for 'Travlr'. 
-    You help users plan trips, find activities, and check local information.
-    You have access to tools to get weather and update the itinerary.
-    Always be helpful, concise, and enthusiastic about travel.
-    Current Trip Context: ${JSON.stringify(trip, null, 2)}`, // Pass trip context to system prompt for awareness
-        tools: {
+function isRecord(value: unknown): value is JsonRecord {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function cloneTrip(trip: unknown): JsonRecord {
+    return isRecord(trip) ? JSON.parse(JSON.stringify(trip)) as JsonRecord : { days: [] }
+}
+
+export async function POST(req: Request) {
+    const currentUser = await getCurrentUser()
+    if (!currentUser) return unauthorizedResponse()
+
+    const rateLimit = consumeRateLimit(`chat:${currentUser.id}`, RATE_LIMITS.chat)
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit)
+
+    if (!process.env.OPENAI_API_KEY?.trim()) {
+        return Response.json(
+            { error: "AI chat is not configured. Add OPENAI_API_KEY before using the assistant." },
+            { status: 503 },
+        )
+    }
+
+    try {
+        const body = await readJsonBody(req, JSON_BODY_LIMITS.chat)
+        if (!body.ok) {
+            return jsonBodyErrorResponse(body, {
+                invalidMessage: "Invalid JSON body.",
+                tooLargeMessage: "Chat request is too large.",
+            })
+        }
+        const rawPayload = body.data
+
+        if (!isRecord(rawPayload)) {
+            return Response.json({ error: "Invalid chat request." }, { status: 400 })
+        }
+
+        const payload = rawPayload as { messages?: unknown; trip?: unknown }
+
+        if (!Array.isArray(payload.messages) || payload.messages.length > 100) {
+            return Response.json({ error: "Invalid chat messages." }, { status: 400 })
+        }
+
+        const messages = payload.messages as UIMessage[]
+        const trip = payload.trip
+        const tripId = isRecord(trip) && typeof trip.id === "string" && trip.id.trim().length > 0
+            ? trip.id.trim()
+            : null
+
+        const tools = {
             getWeather: tool({
                 description: "Get the weather for a location",
-                parameters: z.object({
+                inputSchema: z.object({
                     location: z.string().describe("The city and state, e.g. San Francisco, CA"),
                 }),
                 execute: async ({ location }: { location: string }) => {
-                    // Mock weather data
-                    const temp = Math.floor(Math.random() * (30 - 10) + 10) // 10-30 celsius
-                    const conditions = ["Sunny", "Cloudy", "Rainy", "Partly Cloudy"][
-                        Math.floor(Math.random() * 4)
-                    ]
-                    return {
-                        temperature: temp,
-                        unit: "C",
-                        condition: conditions,
-                        location,
+                    try {
+                        const forecast = await getWeatherForecast(location)
+                        return {
+                            success: true,
+                            temperature: forecast.current.temp,
+                            unit: "C",
+                            condition: forecast.current.condition,
+                            humidity: forecast.current.humidity,
+                            windSpeed: forecast.current.windSpeed,
+                            location: forecast.location,
+                        }
+                    } catch (error) {
+                        if (error instanceof WeatherServiceError) {
+                            return {
+                                success: false,
+                                error: error.message,
+                                code: error.code,
+                                location,
+                            }
+                        }
+
+                        return {
+                            success: false,
+                            error: "The weather provider is unavailable right now. Please try again later.",
+                            code: "WEATHER_PROVIDER_ERROR",
+                            location,
+                        }
                     }
                 },
-            } as any),  // eslint-disable-line @typescript-eslint/no-explicit-any
-            suggestDestinations: tool({
-                description: "Suggest travel destinations based on preferences",
-                parameters: z.object({
-                    preferences: z.string().describe("User preferences like 'beach', 'hiking', 'history'"),
-                    budget: z.enum(["budget", "moderate", "luxury"]).optional(),
-                }),
-                execute: async ({ preferences: _preferences }: { preferences: string }) => {
-                    // Mock suggestions
-                    return {
-                        suggestions: [
-                            { name: "Kyoto, Japan", reason: "Great for history and culture." },
-                            { name: "Reykjavik, Iceland", reason: "Perfect for hiking and nature." },
-                            { name: "Positano, Italy", reason: "Beautiful coastal town for relaxation." }
-                        ]
-                    }
-                }
-            } as any),  // eslint-disable-line @typescript-eslint/no-explicit-any
-            planRoute: tool({
-                description: "Plan a route between two locations",
-                parameters: z.object({
-                    origin: z.string(),
-                    destination: z.string(),
-                    mode: z.enum(["driving", "walking", "transit"]).default("driving")
-                }),
-                execute: async ({ origin, destination, mode }: { origin: string, destination: string, mode: string }) => {
-                    // Mock route data
-                    return {
-                        distance: "15 km",
-                        duration: "30 mins",
-                        mode,
-                        steps: [`Start at ${origin}`, "Go straight 5km", `Arrive at ${destination}`]
-                    }
-                }
-            } as any),  // eslint-disable-line @typescript-eslint/no-explicit-any
+            }),
             updateItinerary: tool({
                 description: "Update the trip itinerary with new activities",
-                parameters: z.object({
-                    day: z.number().describe("The day number to update (1-indexed)"),
-                    action: z.enum(["add", "remove", "replace"]),
-                    activity: z.object({
-                        name: z.string(),
-                        description: z.string(),
-                        time: z.string(),
-                        location: z.string(),
-                    }).describe("The activity details")
-                }),
-                execute: async ({ day, action, activity }: { day: number, action: string, activity: any }) => {  // eslint-disable-line @typescript-eslint/no-explicit-any
-                    // Deep clone the trip to avoid mutation issues (though here it's a fresh object from req)
-                    // Note: In a real app, we might want to validate 'trip' existence.
-                    const updatedTrip = JSON.parse(JSON.stringify(trip || { days: [] }))
-
-                    if (!updatedTrip.days) updatedTrip.days = []
-
-                    // Ensure the day exists
-                    let dayPlan = updatedTrip.days.find((d: any) => d.day === day)  // eslint-disable-line @typescript-eslint/no-explicit-any
-                    if (!dayPlan) {
-                        dayPlan = { day, theme: "New Day", activities: [] }
-                        updatedTrip.days.push(dayPlan)
-                        // Sort days just in case
-                        updatedTrip.days.sort((a: any, b: any) => a.day - b.day)  // eslint-disable-line @typescript-eslint/no-explicit-any
+                inputSchema: itineraryChangeSchema.describe("The itinerary change to apply"),
+                execute: async (change: ItineraryChange) => {
+                    if (!tripId) {
+                        return {
+                            success: false,
+                            message: "Select a trip before changing its itinerary.",
+                        }
                     }
 
-                    if (action === "add") {
-                        dayPlan.activities.push(activity)
-                    } else if (action === "remove") {
-                        dayPlan.activities = dayPlan.activities.filter((a: any) => a.name !== activity.name)  // eslint-disable-line @typescript-eslint/no-explicit-any
-                    } else if (action === "replace") {
-                        // Simple replace logic based on name matching or just add
-                        dayPlan.activities = dayPlan.activities.map((a: any) => a.name === activity.name ? activity : a)  // eslint-disable-line @typescript-eslint/no-explicit-any
+                    const prisma = getPrismaClient()
+                    if (!prisma) {
+                        return {
+                            success: false,
+                            message: "The itinerary could not be saved because the database is not configured.",
+                        }
+                    }
+
+                    let persisted
+                    try {
+                        persisted = await persistItineraryChange(prisma, tripId, currentUser.id, change)
+                    } catch (error) {
+                        console.error("[CHAT_ITINERARY_UPDATE]", error)
+                        return {
+                            success: false,
+                            message: "The itinerary could not be saved right now. Please try again.",
+                        }
+                    }
+                    if (persisted.status !== "updated") {
+                        return {
+                            success: false,
+                            message: persisted.message,
+                        }
+                    }
+
+                    // Return the same lightweight shape the dashboard supplied,
+                    // so it can update immediately while the database remains
+                    // the source of truth for the next reload.
+                    const updatedTrip = cloneTrip(trip)
+                    const days = Array.isArray(updatedTrip.days) ? updatedTrip.days : []
+                    updatedTrip.days = days
+
+                    let dayPlan = days.find((candidate): candidate is JsonRecord => (
+                        isRecord(candidate) && candidate.day === change.day
+                    ))
+
+                    if (!dayPlan) {
+                        dayPlan = { day: change.day, theme: "New Day", activities: [] }
+                        days.push(dayPlan)
+                        days.sort((first, second) => {
+                            const firstDay = isRecord(first) && typeof first.day === "number" ? first.day : 0
+                            const secondDay = isRecord(second) && typeof second.day === "number" ? second.day : 0
+                            return firstDay - secondDay
+                        })
+                    }
+
+                    const activities = Array.isArray(dayPlan.activities) ? dayPlan.activities : []
+                    dayPlan.activities = activities
+
+                    if (change.action === "add") {
+                        activities.push(change.activity)
+                    } else if (change.action === "remove") {
+                        dayPlan.activities = activities.filter((candidate) => (
+                            !isRecord(candidate) || candidate.name !== change.activity.name
+                        ))
+                    } else {
+                        dayPlan.activities = activities.map((candidate) => (
+                            isRecord(candidate) && candidate.name === change.activity.name ? change.activity : candidate
+                        ))
                     }
 
                     return {
                         success: true,
-                        message: `Successfully ${action}ed ${activity.name} to Day ${day}`,
-                        updatedTrip, // Return the full updated trip
-                        day,
-                        action
+                        message: persisted.message,
+                        updatedTrip,
+                        day: change.day,
+                        action: change.action,
                     }
-                }
-            } as any)  // eslint-disable-line @typescript-eslint/no-explicit-any
-        },
-    })
+                },
+            }),
+        }
 
-    return (result as any).toDataStreamResponse()  // eslint-disable-line @typescript-eslint/no-explicit-any
+        const result = streamText({
+            model: openai(process.env.OPENAI_MODEL?.trim() || "gpt-5.6-luna"),
+            messages: await convertToModelMessages(messages, { tools }),
+            // Allow a tool result to be followed by a concise assistant reply,
+            // while keeping one request bounded if the model chains tools.
+            stopWhen: stepCountIs(3),
+            system: `You are an expert travel assistant for 'Travlr'.
+You help users plan trips, find activities, and check local information.
+You have access to tools to get weather and update the itinerary.
+Always be helpful, concise, and enthusiastic about travel.
+Current Trip Context: ${JSON.stringify(trip ?? "No trip selected.", null, 2)}`,
+            tools,
+        })
+
+        return result.toUIMessageStreamResponse()
+    } catch (error) {
+        console.error("Chat API error:", error)
+        return Response.json({ error: "Unable to process chat request." }, { status: 500 })
+    }
 }

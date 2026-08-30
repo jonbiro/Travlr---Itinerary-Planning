@@ -7,6 +7,7 @@ Rails.application.routes.draw do
       resources :trips
       resources :cities
       resources :google, only: [:create]
+      resources :venues, only: [:index]
 
 
       post "/login", to: "auth#create"

@@ -37,16 +37,20 @@ export function ShareTripDialog({ tripId }: { tripId?: string }) {
             })
 
             if (!response.ok) {
-                if (response.status === 404) throw new Error("User not found")
-                if (response.status === 409) throw new Error("User is already a member")
-                throw new Error("Failed to invite user")
+                const responseBody = await response.text()
+                let message = responseBody
+                try {
+                    message = JSON.parse(responseBody)?.error || responseBody
+                } catch {
+                    // The API also uses concise plain-text errors.
+                }
+                throw new Error(message || "Failed to invite user")
             }
 
             toast.success(`Invited ${email} to the trip!`)
             setEmail("")
             setOpen(false)
         } catch (error) {
-            console.error(error)
             toast.error(error instanceof Error ? error.message : "Something went wrong")
         } finally {
             setIsLoading(false)

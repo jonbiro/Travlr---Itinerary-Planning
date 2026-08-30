@@ -1,0 +1,60 @@
+name: Travlr web
+
+on:
+  push:
+    paths:
+      - "travlr-web/**"
+      - ".github/workflows/travlr-web.yml"
+  pull_request:
+    paths:
+      - "travlr-web/**"
+      - ".github/workflows/travlr-web.yml"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: travlr-web
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    env:
+      # This URL is only used to satisfy Prisma configuration during build.
+      # CI does not connect to a database.
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/travlr_ci
+      OPENAI_API_KEY: ci-placeholder
+      NEXTAUTH_SECRET: ci-placeholder
+      NEXTAUTH_URL: http://localhost:3000
+      GOOGLE_CLIENT_ID: ci-placeholder
+      GOOGLE_CLIENT_SECRET: ci-placeholder
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.x
+          cache: npm
+          cache-dependency-path: travlr-web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npx vitest run
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build

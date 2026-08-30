@@ -4,6 +4,10 @@ import { useEffect } from "react"
 
 export function ServiceWorkerRegistration() {
     useEffect(() => {
+        // Development assets change continuously; caching them breaks hot
+        // reloads and can hydrate a new client bundle against stale HTML.
+        if (process.env.NODE_ENV !== "production") return
+
         if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
             // Register service worker
             navigator.serviceWorker
@@ -43,16 +47,4 @@ export function ServiceWorkerRegistration() {
     }, [])
 
     return null
-}
-
-// Hook to check online/offline status
-export function useOnlineStatus() {
-    if (typeof window === 'undefined') return true
-    return navigator.onLine
-}
-
-// Hook to check if app is installed
-export function useIsInstalled() {
-    if (typeof window === 'undefined') return false
-    return window.matchMedia('(display-mode: standalone)').matches
 }

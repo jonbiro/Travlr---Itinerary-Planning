@@ -1,10 +1,12 @@
-const CACHE_NAME = 'travlr-v1';
+const CACHE_NAME = 'travlr-v3';
 
 // Assets to cache immediately on install
 const STATIC_ASSETS = [
     '/',
     '/dashboard',
     '/stats',
+    '/explore',
+    '/trips',
     '/manifest.json',
     '/icons/icon-192x192.png',
     '/icons/icon-512x512.png',
@@ -15,7 +17,16 @@ self.addEventListener('install', (event) => {
     event.waitUntil(
         caches.open(CACHE_NAME).then((cache) => {
             console.log('Service Worker: Caching static assets');
-            return cache.addAll(STATIC_ASSETS);
+            // A failed page request should not prevent the service worker from
+            // installing. This is especially useful when the app is first
+            // deployed and one of the optional routes is not warm yet.
+            return Promise.all(
+                STATIC_ASSETS.map((asset) =>
+                    cache.add(asset).catch((error) => {
+                        console.warn(`Service Worker: Could not cache ${asset}`, error);
+                    })
+                )
+            );
         })
     );
     // Activate immediately
@@ -92,8 +103,9 @@ self.addEventListener('fetch', (event) => {
             if (cached) {
                 // Return cached but also update in background
                 fetch(request).then((response) => {
+                    if (!response.ok) return;
                     caches.open(CACHE_NAME).then((cache) => {
-                        cache.put(request, response);
+                        cache.put(request, response.clone());
                     });
                 }).catch(() => { });
                 return cached;
@@ -143,7 +155,7 @@ self.addEventListener('push', (event) => {
         self.registration.showNotification(data.title || 'Travlr', {
             body: data.body,
             icon: '/icons/icon-192x192.png',
-            badge: '/icons/icon-72x72.png',
+            badge: '/icons/icon-192x192.png',
             tag: data.tag || 'travlr-notification',
             data: data.url,
         })

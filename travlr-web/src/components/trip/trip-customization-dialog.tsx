@@ -15,19 +15,14 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
+import type { TripTheme } from "@/lib/types/trip"
+
+export type { TripTheme } from "@/lib/types/trip"
 
 interface TripCustomizationDialogProps {
     tripId?: string
     currentTheme?: TripTheme
     onThemeChange?: (theme: TripTheme) => void
-}
-
-export interface TripTheme {
-    backgroundColor: string
-    backgroundImage?: string
-    accentColor: string
-    gradientFrom?: string
-    gradientTo?: string
 }
 
 // Preset color themes
@@ -109,6 +104,7 @@ export function TripCustomizationDialog({
     const [customColor, setCustomColor] = useState("#3b82f6")
     const [customImageUrl, setCustomImageUrl] = useState("")
     const [isSaving, setIsSaving] = useState(false)
+    const [saveError, setSaveError] = useState<string | null>(null)
     const [open, setOpen] = useState(false)
 
     const handleSelectPresetTheme = (theme: TripTheme) => {
@@ -141,20 +137,32 @@ export function TripCustomizationDialog({
     }
 
     const handleSave = async () => {
+        if (!tripId) {
+            setSaveError("Select a trip before saving its appearance.")
+            return
+        }
+
         setIsSaving(true)
+        setSaveError(null)
         try {
-            // In production, save to database
-            if (tripId) {
-                await fetch(`/api/trip/${tripId}/theme`, {
-                    method: "PUT",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(selectedTheme),
-                })
+            const response = await fetch(`/api/trip/${encodeURIComponent(tripId)}/theme`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(selectedTheme),
+            })
+            const payload = await response.json().catch(() => null) as { error?: unknown } | null
+            if (!response.ok) {
+                throw new Error(
+                    typeof payload?.error === "string"
+                        ? payload.error
+                        : "Unable to save the trip appearance.",
+                )
             }
+
             onThemeChange?.(selectedTheme)
             setOpen(false)
         } catch (error) {
-            console.error("Failed to save theme:", error)
+            setSaveError(error instanceof Error ? error.message : "Unable to save the trip appearance.")
         } finally {
             setIsSaving(false)
         }
@@ -163,7 +171,7 @@ export function TripCustomizationDialog({
     return (
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2">
+                <Button variant="outline" size="sm" className="gap-2" disabled={!tripId}>
                     <Palette className="h-4 w-4" />
                     Customize
                 </Button>
@@ -326,11 +334,16 @@ export function TripCustomizationDialog({
                     </TabsContent>
                 </Tabs>
 
-                <div className="flex justify-end gap-2 mt-4">
+                <div className="flex items-center justify-end gap-2 mt-4">
+                    {saveError && (
+                        <p role="alert" className="mr-auto text-sm text-destructive">
+                            {saveError}
+                        </p>
+                    )}
                     <Button variant="outline" onClick={() => setOpen(false)}>
                         Cancel
                     </Button>
-                    <Button onClick={handleSave} disabled={isSaving}>
+                    <Button onClick={handleSave} disabled={isSaving || !tripId}>
                         {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                         Save Theme
                     </Button>

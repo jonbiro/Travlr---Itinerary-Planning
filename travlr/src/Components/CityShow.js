@@ -1,5 +1,4 @@
 import React, {Component} from "react";
-import axios from "axios";
 import {withRouter} from "react-router-dom";
 import "./map.css";
 import CityItinerary from "./CityItinerary";
@@ -41,64 +40,78 @@ class CityShow extends Component {
     }
   };
 
-  // Note: 3rd-Party API keys left unhidden on purpose for testing, instead of hidden in ENV file. These public keys are not registered to me personally.
-
   renderMap = () => {
-    loadScript(
-      `https://maps.googleapis.com/maps/api/js?key=AIzaSyD1DrDBUd6GNL2EIBCxK-K0OjkTny8kbuA&&libraries=places&callback=initMap`
-    );
+    const mapsKey = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
+    if (!mapsKey || this.state.venues.length === 0) {
+      return;
+    }
+
     window.initMap = this.initMap;
+    loadScript(
+      `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
+        mapsKey
+      )}&libraries=places&callback=initMap`
+    );
   };
 
   getVenues = query => {
-    const endPoint = "https://api.foursquare.com/v2/venues/explore?";
-    const parameters = {
-      client_id: "PMHC2WA1VCBHVYOPPSJ0QSBYTLRF4PNJ04OWVWV0PZJ0QFIR",
-      client_secret: "CULSZZ44YAEBOWBFGPB4BF5ISRXXSNYR0EE3JV3CNE2ZWHV0",
-      section: "sights",
-      near: this.state.city.name,
-      v: "20192503"
-    };
-    axios
-      .get(endPoint + new URLSearchParams(parameters))
-      .then(response => {
+    this.fetchVenues()
+      .then(json => {
         this.setState(
           {
-            venues: response.data.response.groups[0].items,
+            venues: this.venueItems(json),
             searchTerm: query
           },
-          this.renderMap()
+          this.renderMap
         );
       })
       .catch(error => {
-        console.log("ERROR!! " + error);
+        this.setState({ success: error.message });
       });
   };
 
   getVenuesSearch = query => {
     let po = this.state.venues;
-    const endPoint = "https://api.foursquare.com/v2/venues/explore?";
-    const parameters = {
-      client_id: "PMHC2WA1VCBHVYOPPSJ0QSBYTLRF4PNJ04OWVWV0PZJ0QFIR",
-      client_secret: "CULSZZ44YAEBOWBFGPB4BF5ISRXXSNYR0EE3JV3CNE2ZWHV0",
-      query: query || "food",
-      near: this.state.city.name,
-      v: "20192503"
-    };
-    axios.get(endPoint + new URLSearchParams(parameters)).then(response => {
-      if (response.data.response.groups[0].items.length > 0) {
+    this.fetchVenues(query || "food").then(json => {
+      const venues = this.venueItems(json);
+      if (venues.length > 0) {
         this.setState(
           {
-            venues: response.data.response.groups[0].items,
+            venues: venues,
             searchTerm: query
           },
-          this.renderMap()
+          this.renderMap
         );
       } else {
         this.setState({ venues: po });
       }
+    }).catch(error => this.setState({ success: error.message }));
+  };
+
+  fetchVenues = query => {
+    const parameters = new URLSearchParams({ location: this.state.city.name });
+    if (query) {
+      parameters.set("query", query);
+    }
+
+    return fetch(`/api/v1/venues?${parameters.toString()}`, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${localStorage.getItem("accessToken")}`
+      }
+    }).then(response => {
+      if (!response.ok) {
+        throw new Error("Venue search is unavailable right now.");
+      }
+      return response.json();
     });
   };
+
+  venueItems = json =>
+    (((json || {}).response || {}).groups || []).reduce(
+      (items, group) => items.concat(group.items || []),
+      []
+    );
 
   saveFunc = (lat, lng, name) => {
     let data = {
@@ -121,6 +134,10 @@ class CityShow extends Component {
   };
 
   initMap = () => {
+    if (!window.google || !this.state.venues.length) {
+      return;
+    }
+
     const centerPoint = this.state.venues[0].venue.location || {
       lat: 40.7128,
       lng: -74.006
@@ -234,9 +251,17 @@ class CityShow extends Component {
 }
 
 function loadScript(url) {
+  if (window.document.querySelector('script[data-travlr-maps="true"]')) {
+    if (window.google && window.google.maps && window.initMap) {
+      window.initMap();
+    }
+    return;
+  }
+
   let index = window.document.getElementsByTagName("script")[0];
   let script = window.document.createElement("script");
   script.src = url;
+  script.dataset.travlrMaps = "true";
   script.async = true;
   script.defer = true;
   index.parentNode.insertBefore(script, index);

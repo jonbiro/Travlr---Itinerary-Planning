@@ -1,4 +1,6 @@
 class Api::V1::TripsController < ApplicationController
+  include ResourceScope
+
   before_action :find_trip, only: [:show, :update, :destroy]
 
   def index
@@ -16,7 +18,7 @@ class Api::V1::TripsController < ApplicationController
   def create
     @trip = Trip.new(trip_params)
     if @trip.save
-      @trip_user = TripUser.create(user_id: current_user.id, trip_id: @trip.id)
+      @trip_user = @trip.trip_users.create(user_id: current_user.id)
       render json: { trip: @trip, tripuser: @trip_user }, status: :created
     else
       render json: @trip.errors, status: :unprocessable_entity
@@ -35,11 +37,12 @@ class Api::V1::TripsController < ApplicationController
   # DELETE /trips/1
   def destroy
     @trip.destroy
+    head :no_content
   end
 
   #GET /trips and /users
   def group
-    @trips = Trip.find(current_user).trip_users
+    @trips = current_user.trips
 
     render json: { result: "success", data: @trips }
   end
@@ -47,7 +50,8 @@ class Api::V1::TripsController < ApplicationController
   private
 
   def find_trip
-    @trip = Trip.find(params[:id])
+    @trip = accessible_trips.find_by(id: params[:id])
+    not_found!("Trip") unless @trip
   end
 
   def trip_params

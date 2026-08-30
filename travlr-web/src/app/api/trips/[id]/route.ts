@@ -1,21 +1,37 @@
 import { NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
+import { getPrismaClient } from "@/lib/prisma"
+import { getCurrentUser, unauthorizedResponse } from "@/lib/current-user"
+import { updateTripSchema } from "@/lib/validators/trip-update"
+import { JSON_BODY_LIMITS, jsonBodyErrorResponse, readJsonBody } from "@/lib/request-json"
 import { z } from "zod"
 
-// Temporary auth mock
-const _userId = "demo-user"
+function databaseUnavailable() {
+    return NextResponse.json(
+        { error: "Database is not configured. Add DATABASE_URL to use trips." },
+        { status: 503 },
+    )
+}
 
 export async function GET(
     req: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const currentUser = await getCurrentUser()
+        if (!currentUser) return unauthorizedResponse()
+
+        const prisma = getPrismaClient()
+        if (!prisma) return databaseUnavailable()
+
         const { id } = await params
 
-        // Validate ownership
-        const trip = await prisma.trip.findUnique({
+        const trip = await prisma.trip.findFirst({
             where: {
                 id: id,
+                OR: [
+                    { userId: currentUser.id },
+                    { members: { some: { userId: currentUser.id } } },
+                ],
             },
             include: {
                 days: {
@@ -39,10 +55,6 @@ export async function GET(
             return new NextResponse("Not Found", { status: 404 })
         }
 
-        // if (trip.userId !== userId) {
-        //   return new NextResponse("Unauthorized", { status: 401 })
-        // }
-
         return NextResponse.json(trip)
     } catch (error) {
         console.error("[TRIP_GET]", error)
@@ -50,35 +62,41 @@ export async function GET(
     }
 }
 
-const updateTripSchema = z.object({
-    name: z.string().optional(),
-    destination: z.string().optional(),
-    startDate: z.string().optional(),
-    endDate: z.string().optional(),
-    budget: z.number().optional()
-})
-
 export async function PATCH(
     req: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const { id } = await params
-        const json = await req.json()
-        const body = updateTripSchema.parse(json)
+        const currentUser = await getCurrentUser()
+        if (!currentUser) return unauthorizedResponse()
 
-        // Verify ownership first
-        const existingTrip = await prisma.trip.findUnique({
-            where: { id }
+        const prisma = getPrismaClient()
+        if (!prisma) return databaseUnavailable()
+
+        const { id } = await params
+        const json = await readJsonBody(req, JSON_BODY_LIMITS.trip)
+        if (!json.ok) return jsonBodyErrorResponse(json)
+        const body = updateTripSchema.parse(json.data)
+
+        const existingTrip = await prisma.trip.findFirst({
+            where: { id, userId: currentUser.id }
         })
 
         if (!existingTrip) {
             return new NextResponse("Not Found", { status: 404 })
         }
 
-        // if (existingTrip.userId !== userId) {
-        //     return new NextResponse("Unauthorized", { status: 401 })
-        // }
+        const effectiveStartDate = body.startDate ?? existingTrip.startDate
+        const effectiveEndDate = body.endDate ?? existingTrip.endDate
+        if (effectiveStartDate && effectiveEndDate && effectiveEndDate < effectiveStartDate) {
+            return NextResponse.json(
+                {
+                    error: "Invalid trip data",
+                    issues: [{ path: ["endDate"], message: "End date must be on or after the start date" }],
+                },
+                { status: 400 },
+            )
+        }
 
         const trip = await prisma.trip.update({
             where: {
@@ -87,8 +105,8 @@ export async function PATCH(
             data: {
                 name: body.name,
                 destination: body.destination,
-                startDate: body.startDate ? new Date(body.startDate) : undefined,
-                endDate: body.endDate ? new Date(body.endDate) : undefined,
+                startDate: body.startDate,
+                endDate: body.endDate,
                 budget: body.budget
             },
             include: {
@@ -102,8 +120,11 @@ export async function PATCH(
 
         return NextResponse.json(trip)
     } catch (error) {
+        if (error instanceof z.ZodError) {
+            return NextResponse.json({ error: "Invalid trip data", issues: error.issues }, { status: 400 })
+        }
         console.error("[TRIP_PATCH]", error)
-        return new NextResponse("Internal Error", { status: 500 })
+        return NextResponse.json({ error: "Unable to update trip" }, { status: 500 })
     }
 }
 
@@ -112,20 +133,21 @@ export async function DELETE(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const currentUser = await getCurrentUser()
+        if (!currentUser) return unauthorizedResponse()
+
+        const prisma = getPrismaClient()
+        if (!prisma) return databaseUnavailable()
+
         const { id } = await params
 
-        // Verify ownership first
-        const existingTrip = await prisma.trip.findUnique({
-            where: { id }
+        const existingTrip = await prisma.trip.findFirst({
+            where: { id, userId: currentUser.id }
         })
 
         if (!existingTrip) {
             return new NextResponse("Not Found", { status: 404 })
         }
-
-        // if (existingTrip.userId !== userId) {
-        //     return new NextResponse("Unauthorized", { status: 401 })
-        // }
 
         await prisma.trip.delete({
             where: {

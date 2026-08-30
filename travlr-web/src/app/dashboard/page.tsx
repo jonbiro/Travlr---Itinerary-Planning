@@ -24,7 +24,7 @@ import { ShareTripDialog } from "@/components/trip/share-trip-dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { TripChat } from "@/components/trip/trip-chat"
 import { PackingList } from "@/components/trip/packing-list"
-import type { Trip } from "@/lib/types/trip"
+import type { Trip, TripTheme } from "@/lib/types/trip"
 import { WeatherForecastComponent } from "@/components/trip/weather-forecast"
 import { ExpenseTracker } from "@/components/trip/expense-tracker"
 import { NavigationButtons } from "@/components/trip/navigation-buttons"
@@ -41,10 +41,29 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 
+function normalizeTripTheme(value: unknown): TripTheme | null {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null
+
+    const record = value as Record<string, unknown>
+    if (typeof record.backgroundColor !== "string" || typeof record.accentColor !== "string") {
+        return null
+    }
+
+    return {
+        backgroundColor: record.backgroundColor,
+        accentColor: record.accentColor,
+        backgroundImage: typeof record.backgroundImage === "string" ? record.backgroundImage : undefined,
+        gradientFrom: typeof record.gradientFrom === "string" ? record.gradientFrom : undefined,
+        gradientTo: typeof record.gradientTo === "string" ? record.gradientTo : undefined,
+    }
+}
+
 export default function DashboardPage() {
     const [trips, setTrips] = useState<Trip[]>([])
     const [selectedTripId, setSelectedTripId] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(true)
+    const [loadError, setLoadError] = useState<string | null>(null)
+    const [isDesktop, setIsDesktop] = useState<boolean | null>(null)
 
     // Derived state for the currently selected trip
     const trip = trips.find(t => t.id === selectedTripId) || null
@@ -54,45 +73,57 @@ export default function DashboardPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
+    useEffect(() => {
+        const mediaQuery = window.matchMedia("(min-width: 768px)")
+        const updateViewport = () => setIsDesktop(mediaQuery.matches)
+
+        updateViewport()
+        mediaQuery.addEventListener("change", updateViewport)
+        return () => mediaQuery.removeEventListener("change", updateViewport)
+    }, [])
+
     const fetchTrips = async () => {
         try {
             setIsLoading(true)
+            setLoadError(null)
             const response = await fetch("/api/trips")
-            if (response.ok) {
-                const data = await response.json()
-                // Map the backend data structure to our frontend types if needed
-                // The API returns nested structure matching Prisma include, which needs mapping
-                const mappedTrips = data.map((t: any) => ({  // eslint-disable-line @typescript-eslint/no-explicit-any
-                    id: t.id,
-                    tripName: t.name || t.tripName || "Untitled Trip",
-                    destination: t.destination,
-                    startDate: t.startDate,
-                    endDate: t.endDate,
-                    budget: t.budget,
-                    currency: t.currency,
-                    days: t.days.map((d: any) => ({  // eslint-disable-line @typescript-eslint/no-explicit-any
-                        id: d.id,
-                        day: d.dayNumber,
-                        date: d.date,
-                        theme: d.theme,
-                        activities: d.activities.map((a: any) => ({  // eslint-disable-line @typescript-eslint/no-explicit-any
-                            id: a.id,
-                            name: a.name,
-                            description: a.description,
-                            time: a.startTime, // Using startTime as time
-                            location: a.location,
-                            coordinates: a.lat && a.lng ? { lat: Number(a.lat), lng: Number(a.lng) } : undefined,
-                            order: a.order
-                        }))
+            if (!response.ok) {
+                const payload = await response.json().catch(() => null)
+                throw new Error(payload?.error || "Unable to load trips")
+            }
+
+            const data = await response.json()
+            const mappedTrips = data.map((t: any) => ({  // eslint-disable-line @typescript-eslint/no-explicit-any
+                id: t.id,
+                tripName: t.name || t.tripName || "Untitled Trip",
+                destination: t.destination,
+                startDate: t.startDate,
+                endDate: t.endDate,
+                budget: t.budget,
+                currency: t.currency,
+                theme: normalizeTripTheme(t.theme),
+                days: t.days.map((d: any) => ({  // eslint-disable-line @typescript-eslint/no-explicit-any
+                    id: d.id,
+                    day: d.dayNumber,
+                    date: d.date,
+                    theme: d.theme,
+                    activities: d.activities.map((a: any) => ({  // eslint-disable-line @typescript-eslint/no-explicit-any
+                        id: a.id,
+                        name: a.name,
+                        description: a.description,
+                        time: a.startTime,
+                        location: a.location,
+                        coordinates: a.lat && a.lng ? { lat: Number(a.lat), lng: Number(a.lng) } : undefined,
+                        order: a.order
                     }))
                 }))
-                setTrips(mappedTrips)
-                if (mappedTrips.length > 0 && !selectedTripId) {
-                    setSelectedTripId(mappedTrips[0].id)
-                }
+            }))
+            setTrips(mappedTrips)
+            if (mappedTrips.length > 0 && !selectedTripId) {
+                setSelectedTripId(mappedTrips[0].id)
             }
         } catch (error) {
-            console.error("Failed to fetch trips", error)
+            setLoadError(error instanceof Error ? error.message : "Unable to load trips")
         } finally {
             setIsLoading(false)
         }
@@ -111,26 +142,41 @@ export default function DashboardPage() {
         })
     }
 
-    return (
-        <div className="h-[calc(100vh-4rem)] w-full">
-            <ResizablePanelGroup direction="horizontal">
-                <ResizablePanel defaultSize={30} minSize={20} maxSize={50}>
-                    <Tabs defaultValue="itinerary" className="flex flex-col h-full border-r">
-                        <div className="p-4 border-b bg-muted/20">
-                            <TabsList className="grid w-full grid-cols-7">
-                                <TabsTrigger value="itinerary">Trips</TabsTrigger>
-                                <TabsTrigger value="flights">Flights</TabsTrigger>
-                                <TabsTrigger value="weather">Weather</TabsTrigger>
-                                <TabsTrigger value="expenses">Expenses</TabsTrigger>
-                                <TabsTrigger value="memories">Memories</TabsTrigger>
-                                <TabsTrigger value="chat">AI</TabsTrigger>
-                                <TabsTrigger value="packing">Packing</TabsTrigger>
+    const activeTheme = trip?.theme ?? null
+    const themeTint = activeTheme
+        ? activeTheme.gradientFrom && activeTheme.gradientTo
+            ? `linear-gradient(135deg, ${activeTheme.gradientFrom}1A, ${activeTheme.gradientTo}1A)`
+            : `${activeTheme.backgroundColor}14`
+        : undefined
+
+    const workspace = (
+        <Tabs defaultValue="itinerary" className="flex h-full flex-col md:border-r">
+                        <div className="overflow-x-auto border-b bg-muted/20 p-2 md:p-4">
+                            <TabsList className="flex w-max min-w-full justify-start md:grid md:w-full md:grid-cols-7">
+                                <TabsTrigger className="shrink-0" value="itinerary">Trips</TabsTrigger>
+                                <TabsTrigger className="shrink-0" value="flights">Flights</TabsTrigger>
+                                <TabsTrigger className="shrink-0" value="weather">Weather</TabsTrigger>
+                                <TabsTrigger className="shrink-0" value="expenses">Expenses</TabsTrigger>
+                                <TabsTrigger className="shrink-0" value="memories">Memories</TabsTrigger>
+                                <TabsTrigger className="shrink-0" value="chat">AI</TabsTrigger>
+                                <TabsTrigger className="shrink-0" value="packing">Packing</TabsTrigger>
                             </TabsList>
                         </div>
 
                         <TabsContent value="itinerary" className="flex-1 flex flex-col min-h-0 data-[state=inactive]:hidden">
-                            <div className="p-4 border-b flex items-center justify-between">
-                                <div className="flex-1 min-w-0 mr-4">
+                            <div
+                                className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between"
+                                style={activeTheme ? {
+                                    background: activeTheme.backgroundImage ? undefined : themeTint,
+                                    backgroundImage: activeTheme.backgroundImage
+                                        ? `linear-gradient(color-mix(in oklab, var(--background) 84%, transparent), color-mix(in oklab, var(--background) 84%, transparent)), url("${activeTheme.backgroundImage}")`
+                                        : undefined,
+                                    backgroundPosition: "center",
+                                    backgroundSize: "cover",
+                                    borderBottomColor: activeTheme.accentColor,
+                                } : undefined}
+                            >
+                                <div className="min-w-0 flex-1 sm:mr-4">
                                     {/* Trip Selector or Title */}
                                     {trips.length > 0 ? (
                                         <Select value={selectedTripId || ""} onValueChange={setSelectedTripId}>
@@ -152,11 +198,23 @@ export default function DashboardPage() {
                                         {trip ? `${trip.destination} • ${trip.days.length} Days` : "No trip selected"}
                                     </p>
                                 </div>
-                                <div className="flex gap-2">
-                                    <TripCustomizationDialog tripId={trip ? trip.id : undefined} />
+                                <div className="flex flex-wrap gap-2">
+                                    <TripCustomizationDialog
+                                        key={trip?.id || "no-trip"}
+                                        tripId={trip?.id}
+                                        currentTheme={trip?.theme ?? undefined}
+                                        onThemeChange={(theme) => {
+                                            if (!trip) return
+                                            setTrips((previousTrips) => previousTrips.map((currentTrip) => (
+                                                currentTrip.id === trip.id
+                                                    ? { ...currentTrip, theme }
+                                                    : currentTrip
+                                            )))
+                                        }}
+                                    />
                                     {trip && <CalendarSyncDialog trip={trip} />}
                                     {trip && <ExportMenu trip={trip} />}
-                                    <ShareTripDialog />
+                                    <ShareTripDialog tripId={trip?.id} />
                                     <Dialog>
                                         <DialogTrigger asChild>
                                             <Button size="sm" variant="secondary"><Plus className="h-4 w-4 mr-1" /> New</Button>
@@ -213,7 +271,12 @@ export default function DashboardPage() {
                                         ))
                                     ) : (
                                         <div className="text-center text-muted-foreground p-8">
-                                            <p>No itinerary yet. Create a new trip to get started!</p>
+                                            <p>{loadError || "No itinerary yet. Create a new trip to get started!"}</p>
+                                            {loadError && (
+                                                <Button variant="outline" size="sm" className="mt-4" onClick={fetchTrips}>
+                                                    Try again
+                                                </Button>
+                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -261,13 +324,32 @@ export default function DashboardPage() {
                         <TabsContent value="flights" className="flex-1 flex flex-col min-h-0 data-[state=inactive]:hidden">
                             <FlightTracker tripId={trip ? trip.id : undefined} />
                         </TabsContent>
-                    </Tabs>
+        </Tabs>
+    )
+
+    if (isDesktop === null) {
+        return (
+            <div className="flex h-[calc(100vh-4rem)] items-center justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+        )
+    }
+
+    if (!isDesktop) {
+        return <div className="h-[calc(100vh-4rem)] w-full">{workspace}</div>
+    }
+
+    return (
+        <div className="h-[calc(100vh-4rem)] w-full">
+            <ResizablePanelGroup direction="horizontal">
+                <ResizablePanel defaultSize={30} minSize={20} maxSize={50}>
+                    {workspace}
                 </ResizablePanel>
                 <ResizableHandle withHandle />
-                <ResizablePanel defaultSize={70}>
+                <ResizablePanel className="max-md:hidden" defaultSize={70}>
                     <div className="h-full w-full relative">
                         <div className="absolute inset-0 p-4">
-                            <TripsMap />
+                            <TripsMap trip={trip} />
                         </div>
                     </div>
                 </ResizablePanel>

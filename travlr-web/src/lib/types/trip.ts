@@ -1,3 +1,11 @@
+export interface TripTheme {
+    backgroundColor: string
+    backgroundImage?: string
+    accentColor: string
+    gradientFrom?: string
+    gradientTo?: string
+}
+
 export interface Activity {
     id?: string
     name: string
@@ -24,6 +32,7 @@ export interface Trip {
     endDate: string // ISO string
     budget: string | number
     days: DayPlan[]
+    theme?: TripTheme | null
     // Add other fields as needed
     currency?: string
 }

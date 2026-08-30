@@ -1,9 +1,10 @@
-import { TravelStatsComponent } from "@/components/dashboard/travel-stats"
 import { Metadata } from "next"
+
+import { TravelStatsDashboard } from "./stats-view"
 
 export const metadata: Metadata = {
     title: "Travel Stats | Travlr",
-    description: "Track your travel statistics - countries visited, flight hours, distance traveled and more",
+    description: "Track your saved trips, destinations, itinerary days, and activities",
 }
 
 export default function StatsPage() {
@@ -16,7 +17,7 @@ export default function StatsPage() {
                         Track your adventures around the world
                     </p>
                 </div>
-                <TravelStatsComponent />
+                <TravelStatsDashboard />
             </div>
         </div>
     )

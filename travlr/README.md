@@ -7,6 +7,10 @@
 
 Google Maps Api in Vanilla JS with Foursquare API search. React frontend with Ruby on Rails Backend
 
+## Environment
+
+The React client expects `REACT_APP_GOOGLE_MAPS_API_KEY` at build time. Use a browser-restricted Google Maps JavaScript key with the required site origins; do not put server credentials in this file or any client-side code. The Rails API requires `JWT_SECRET`, `GOOGLE_MAPS_API_KEY`, `FOURSQUARE_CLIENT_ID`, and `FOURSQUARE_CLIENT_SECRET` as deployment environment variables. Foursquare credentials stay on the Rails server through the authenticated `/api/v1/venues` proxy.
+
 ## `Plan your travel itinerary with your friends`
 
 Travlr makes it easy and fast to build an itinerary.
@@ -77,4 +81,3 @@ Please read [CONTRIBUTING](https://google.com) for details on the process for su
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](https://google.com) file for details
-

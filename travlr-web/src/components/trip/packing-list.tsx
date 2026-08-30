@@ -20,19 +20,23 @@ export function PackingList({ destination, days, activities }: { destination: st
     const [categories, setCategories] = useState<PackingCategory[]>([])
     const [isLoading, setIsLoading] = useState(false)
     const [generated, setGenerated] = useState(false)
+    const [error, setError] = useState<string | null>(null)
 
     const generateList = async () => {
         setIsLoading(true)
+        setError(null)
         try {
             const response = await fetch("/api/trip/packing-list", {
                 method: "POST",
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ destination, days, activities }),
             })
             const data = await response.json()
+            if (!response.ok) throw new Error(data.error || "Unable to generate packing list")
             setCategories(data.categories)
             setGenerated(true)
         } catch (error) {
-            console.error("Failed to generate packing list", error)
+            setError(error instanceof Error ? error.message : "Unable to generate packing list")
         } finally {
             setIsLoading(false)
         }
@@ -53,13 +57,14 @@ export function PackingList({ destination, days, activities }: { destination: st
                 <div>
                     <h3 className="font-semibold text-lg">Smart Packing List</h3>
                     <p className="text-sm text-muted-foreground">
-                        Get a personalized list based on your activities and weather.
+                        Get a personalized list based on your destination and planned activities.
                     </p>
                 </div>
                 <Button onClick={generateList} disabled={isLoading}>
                     {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                     {isLoading ? "Generating..." : "Generate List"}
                 </Button>
+                {error && <p className="text-sm text-destructive">{error}</p>}
             </div>
         )
     }
