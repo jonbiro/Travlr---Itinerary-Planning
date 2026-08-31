@@ -1,9 +1,11 @@
+"use client"
+
 import Link from "next/link"
+import { usePathname } from "next/navigation"
 import { MapPin, Menu } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { isAuthConfigured } from "@/lib/auth"
-import { isDemoMode } from "@/lib/current-user"
+import { cn } from "@/lib/utils"
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -18,9 +20,17 @@ const navigation = [
     { href: "/explore", label: "Explore" },
 ]
 
-export function Navbar() {
-    const demoMode = isDemoMode()
-    const authConfigured = isAuthConfigured()
+type NavbarProps = {
+    demoMode: boolean
+    authConfigured: boolean
+}
+
+function isCurrentPath(pathname: string, href: string) {
+    return pathname === href || pathname.startsWith(`${href}/`)
+}
+
+export function Navbar({ demoMode, authConfigured }: NavbarProps) {
+    const pathname = usePathname()
 
     return (
         <nav aria-label="Primary navigation" className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
@@ -31,12 +41,24 @@ export function Navbar() {
                     </div>
                     Travlr
                 </Link>
-                <div className="hidden md:flex items-center gap-6 text-sm font-medium text-muted-foreground">
-                    {navigation.map((item) => (
-                        <Link key={item.href} href={item.href} className="transition-colors hover:text-foreground">
-                            {item.label}
-                        </Link>
-                    ))}
+                <div className="hidden md:flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                    {navigation.map((item) => {
+                        const isCurrent = isCurrentPath(pathname, item.href)
+
+                        return (
+                            <Link
+                                key={item.href}
+                                href={item.href}
+                                aria-current={isCurrent ? "page" : undefined}
+                                className={cn(
+                                    "rounded-md px-2.5 py-1.5 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                    isCurrent && "bg-muted text-foreground",
+                                )}
+                            >
+                                {item.label}
+                            </Link>
+                        )
+                    })}
                 </div>
                 <div className="ml-auto flex items-center gap-3">
                     {demoMode ? (
@@ -53,11 +75,21 @@ export function Navbar() {
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent className="w-48" align="end">
-                            {navigation.map((item) => (
-                                <DropdownMenuItem key={item.href} asChild>
-                                    <Link href={item.href}>{item.label}</Link>
-                                </DropdownMenuItem>
-                            ))}
+                            {navigation.map((item) => {
+                                const isCurrent = isCurrentPath(pathname, item.href)
+
+                                return (
+                                    <DropdownMenuItem key={item.href} asChild>
+                                        <Link
+                                            href={item.href}
+                                            aria-current={isCurrent ? "page" : undefined}
+                                            className={cn(isCurrent && "bg-accent font-medium text-accent-foreground")}
+                                        >
+                                            {item.label}
+                                        </Link>
+                                    </DropdownMenuItem>
+                                )
+                            })}
                         </DropdownMenuContent>
                     </DropdownMenu>
                 </div>

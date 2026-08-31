@@ -1,2 +1,2 @@
-web: bundle exec rails s
-release: bin/rake db:migrate
+web: npm run start
+release: npm run db:migrate

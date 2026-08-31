@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { isDemoMode } from "./current-user"
+import { isDemoMode, unauthorizedResponse } from "./current-user"
 
 beforeEach(() => {
     vi.stubEnv("TRAVLR_DEMO_MODE", "")
@@ -34,5 +34,33 @@ describe("isDemoMode", () => {
         vi.stubEnv("TRAVLR_DEMO_MODE", "true")
 
         expect(isDemoMode()).toBe(false)
+    })
+})
+
+describe("unauthorizedResponse", () => {
+    it("fails closed without caching when authentication is not configured", async () => {
+        const response = unauthorizedResponse()
+
+        expect(response.status).toBe(401)
+        expect(response.headers.get("cache-control")).toBe("private, no-store")
+        await expect(response.json()).resolves.toMatchObject({
+            code: "AUTH_NOT_CONFIGURED",
+            authConfigured: false,
+        })
+    })
+
+    it("distinguishes a missing session from missing provider configuration", async () => {
+        vi.stubEnv("NEXTAUTH_SECRET", "test-secret")
+        vi.stubEnv("GOOGLE_CLIENT_ID", "test-client")
+        vi.stubEnv("GOOGLE_CLIENT_SECRET", "test-client-secret")
+
+        const response = unauthorizedResponse()
+
+        expect(response.status).toBe(401)
+        expect(response.headers.get("cache-control")).toBe("private, no-store")
+        await expect(response.json()).resolves.toMatchObject({
+            code: "AUTH_REQUIRED",
+            authConfigured: true,
+        })
     })
 })

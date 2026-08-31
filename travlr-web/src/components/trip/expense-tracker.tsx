@@ -40,6 +40,7 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { cn } from "@/lib/utils"
 import type { Expense, ExpenseCategory } from "@/lib/types/expense"
 import { EXPENSE_CATEGORIES, getCategoryInfo, calculateExpenseSummary } from "@/lib/types/expense"
@@ -101,6 +102,7 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
     const [isLoading, setIsLoading] = useState(false)
     const [isAddingExpense, setIsAddingExpense] = useState(false)
     const [deletingExpenseId, setDeletingExpenseId] = useState<string | null>(null)
+    const [expenseToDelete, setExpenseToDelete] = useState<Expense | null>(null)
     const [dialogOpen, setDialogOpen] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [authState, setAuthState] = useState<AuthState | null>(null)
@@ -217,11 +219,13 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
         }
     }
 
-    async function handleDeleteExpense(expenseId: string) {
-        setDeletingExpenseId(expenseId)
+    async function handleDeleteExpense(expense: Expense) {
+        if (!expense.canDelete) return
+
+        setDeletingExpenseId(expense.id)
         setError(null)
         try {
-            const res = await fetch(`/api/trip/expenses?id=${expenseId}`, {
+            const res = await fetch(`/api/trip/expenses?id=${encodeURIComponent(expense.id)}`, {
                 method: "DELETE",
             })
 
@@ -239,11 +243,12 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
                     : "Unable to delete expense"
                 throw new Error(message)
             }
-            setExpenses((previousExpenses) => previousExpenses.filter((expense) => expense.id !== expenseId))
+            setExpenses((previousExpenses) => previousExpenses.filter((currentExpense) => currentExpense.id !== expense.id))
         } catch (deleteError) {
             setError(deleteError instanceof Error ? deleteError.message : "Unable to delete expense")
         } finally {
             setDeletingExpenseId(null)
+            setExpenseToDelete(null)
         }
     }
 
@@ -286,8 +291,8 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
 
     if (isLoading) {
         return (
-            <div className="flex flex-col items-center justify-center p-8 h-full">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            <div className="flex flex-col items-center justify-center p-8 h-full" role="status" aria-live="polite">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" aria-hidden="true" />
                 <p className="mt-2 text-sm text-muted-foreground">Loading expenses...</p>
             </div>
         )
@@ -336,7 +341,7 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
                                     <div className="grid gap-2">
                                         <Label htmlFor="category">Category</Label>
                                         <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
-                                            <SelectTrigger>
+                                            <SelectTrigger id="category">
                                                 <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -408,6 +413,8 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
                         {summary.percentUsed !== null && (
                             <Progress
                                 value={Math.min(summary.percentUsed, 100)}
+                                aria-label="Budget spent"
+                                aria-valuetext={`${currency} ${summary.total.toFixed(2)} of ${currency} ${budget.toFixed(2)}, ${Math.round(summary.percentUsed)}%`}
                                 className={cn(
                                     "h-2",
                                     summary.percentUsed > 90 && "[&>div]:bg-destructive"
@@ -476,20 +483,22 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
                                             <span className="font-semibold">
                                                 {expense.currency} {Number(expense.amount).toFixed(2)}
                                             </span>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
-                                                onClick={() => handleDeleteExpense(expense.id)}
-                                                disabled={deletingExpenseId !== null}
-                                                aria-label={`Delete ${expense.description || catInfo.label} expense`}
-                                            >
-                                                {deletingExpenseId === expense.id ? (
-                                                    <Loader2 className="h-4 w-4 animate-spin text-destructive" aria-hidden="true" />
-                                                ) : (
-                                                    <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
-                                                )}
-                                            </Button>
+                                            {expense.canDelete && (
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-9 w-9"
+                                                    onClick={() => setExpenseToDelete(expense)}
+                                                    disabled={deletingExpenseId !== null}
+                                                    aria-label={`Delete ${expense.description || catInfo.label} expense`}
+                                                >
+                                                    {deletingExpenseId === expense.id ? (
+                                                        <Loader2 className="h-4 w-4 animate-spin text-destructive" aria-hidden="true" />
+                                                    ) : (
+                                                        <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
+                                                    )}
+                                                </Button>
+                                            )}
                                         </div>
                                     </div>
                                 )
@@ -498,6 +507,22 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
                     </div>
                 </ScrollArea>
             </div>
+            <ConfirmDialog
+                open={expenseToDelete !== null}
+                onOpenChange={(open) => {
+                    if (!open) setExpenseToDelete(null)
+                }}
+                title="Delete expense?"
+                description={expenseToDelete
+                    ? `Delete ${expenseToDelete.description || getCategoryInfo(expenseToDelete.category).label} permanently? This cannot be undone.`
+                    : "This expense will be permanently deleted."}
+                confirmLabel="Delete expense"
+                cancelLabel="Keep expense"
+                isConfirming={deletingExpenseId !== null}
+                onConfirm={() => {
+                    if (expenseToDelete) return handleDeleteExpense(expenseToDelete)
+                }}
+            />
         </div>
     )
 }

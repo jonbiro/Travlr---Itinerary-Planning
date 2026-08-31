@@ -1,2 +1,1 @@
-web: PORT=3000 yarn --cwd travlr start
-api: PORT=3005 bundle exec rails s
+web: npm run dev

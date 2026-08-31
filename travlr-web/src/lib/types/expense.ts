@@ -9,6 +9,7 @@ export interface Expense {
     description: string | null
     date: Date | string
     createdAt: Date | string
+    canDelete: boolean
 }
 
 export type ExpenseCategory =

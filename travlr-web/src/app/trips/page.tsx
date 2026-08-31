@@ -4,50 +4,17 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { ArrowRight, CalendarDays, Database, LogIn, MapPin, Plus, RefreshCw, ShieldCheck } from "lucide-react"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { TripManagementControls, type ManagedTrip } from "@/components/trip/trip-management-controls"
+import { normalizeTripSummary } from "@/lib/trip-summary"
 
-type TripSummary = {
-    id: string
-    name: string
-    destination: string | null
-    startDate: string | null
-    endDate: string | null
-    budget: string | number | null
-    currency: string
-    dayCount: number
-}
+type TripSummary = ManagedTrip
 
 type TripsLoadError = {
     kind: "auth" | "setup" | "generic"
     message: string
-}
-
-function asString(value: unknown): string | null {
-    return typeof value === "string" && value.trim() ? value : null
-}
-
-function normalizeTrip(value: unknown): TripSummary | null {
-    if (!value || typeof value !== "object") return null
-
-    const record = value as Record<string, unknown>
-    const id = asString(record.id)
-    if (!id) return null
-
-    const budget = typeof record.budget === "string" || typeof record.budget === "number"
-        ? record.budget
-        : null
-
-    return {
-        id,
-        name: asString(record.name) ?? asString(record.tripName) ?? "Untitled trip",
-        destination: asString(record.destination),
-        startDate: asString(record.startDate),
-        endDate: asString(record.endDate),
-        budget,
-        currency: asString(record.currency) ?? "USD",
-        dayCount: Array.isArray(record.days) ? record.days.length : 0,
-    }
 }
 
 function formatDate(value: string | null): string | null {
@@ -89,6 +56,10 @@ function classifyLoadError(response: Response, payload: unknown): TripsLoadError
     const message = typeof record?.error === "string" && record.error.trim()
         ? record.error
         : "We couldn’t load your trips right now."
+
+    if (code === "RATE_LIMIT_UNAVAILABLE") {
+        return { kind: "generic", message }
+    }
 
     if (
         response.status === 503
@@ -168,7 +139,7 @@ export default function TripsPage() {
         setError(null)
 
         try {
-            const response = await fetch("/api/trips", {
+            const response = await fetch("/api/trips?view=summary", {
                 cache: "no-store",
                 signal: controller.signal,
             })
@@ -180,7 +151,7 @@ export default function TripsPage() {
             if (!Array.isArray(payload)) throw new Error("We couldn’t read your trips right now.")
 
             if (controller.signal.aborted) return
-            setTrips(payload.map(normalizeTrip).filter((trip): trip is TripSummary => trip !== null))
+            setTrips(payload.map(normalizeTripSummary).filter((trip): trip is TripSummary => trip !== null))
         } catch (loadError) {
             if (controller.signal.aborted || (loadError instanceof Error && loadError.name === "AbortError")) return
 
@@ -262,7 +233,10 @@ export default function TripsPage() {
                             return (
                                 <Card key={trip.id} className="flex flex-col transition-shadow hover:shadow-md">
                                     <CardHeader>
-                                        <CardTitle className="line-clamp-2">{trip.name}</CardTitle>
+                                        <div className="flex items-start justify-between gap-3">
+                                            <CardTitle className="line-clamp-2">{trip.name}</CardTitle>
+                                            {!trip.isOwner && <Badge variant="secondary">View only</Badge>}
+                                        </div>
                                         <CardDescription className="flex items-center gap-1.5">
                                             <MapPin className="h-3.5 w-3.5 shrink-0" />
                                             {trip.destination ?? "Destination to be confirmed"}
@@ -283,6 +257,30 @@ export default function TripsPage() {
                                                 <ArrowRight className="h-4 w-4" />
                                             </Link>
                                         </Button>
+                                        {trip.isOwner ? (
+                                            <TripManagementControls
+                                                trip={trip}
+                                                onSaved={(updatedTrip) => {
+                                                    setTrips((currentTrips) => currentTrips.map((currentTrip) => (
+                                                        currentTrip.id === updatedTrip.id ? updatedTrip : currentTrip
+                                                    )))
+                                                }}
+                                                onDeleted={(deletedTripId) => {
+                                                    setTrips((currentTrips) => currentTrips.filter((currentTrip) => currentTrip.id !== deletedTripId))
+                                                }}
+                                            />
+                                        ) : (
+                                            <div className="space-y-1">
+                                                <p className="text-xs text-muted-foreground">Shared with you · You can view this itinerary.</p>
+                                                <TripManagementControls
+                                                    trip={trip}
+                                                    onSaved={() => undefined}
+                                                    onDeleted={(leftTripId) => {
+                                                        setTrips((currentTrips) => currentTrips.filter((currentTrip) => currentTrip.id !== leftTripId))
+                                                    }}
+                                                />
+                                            </div>
+                                        )}
                                     </CardContent>
                                 </Card>
                             )

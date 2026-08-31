@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { Prisma } from "@prisma/client"
 import { ensureDemoUser, getPrismaClient } from "@/lib/prisma"
 import { getCurrentUser, unauthorizedResponse } from "@/lib/current-user"
 import { consumeRateLimitAsync, RATE_LIMITS, rateLimitResponse } from "@/lib/rate-limit"
@@ -6,11 +7,18 @@ import { JSON_BODY_LIMITS, jsonBodyErrorResponse, readJsonBody } from "@/lib/req
 import { collectionPageSize, inclusiveUtcDayCount, PRODUCT_LIMITS } from "@/lib/product-limits"
 import { z } from "zod"
 import { dateOnlySchema } from "@/lib/date-only"
+import {
+    serializeTripSummaryWithOwnerCapability,
+    serializeTripWithOwnerCapability,
+} from "@/lib/trip-capabilities"
+import { buildTripStatsAggregate } from "@/lib/trip-stats"
+
+const PRIVATE_NO_STORE_HEADERS = { "Cache-Control": "private, no-store" }
 
 function databaseUnavailable() {
     return NextResponse.json(
         { error: "Database is not configured. Add DATABASE_URL to use trips." },
-        { status: 503 },
+        { status: 503, headers: PRIVATE_NO_STORE_HEADERS },
     )
 }
 
@@ -28,13 +36,87 @@ export async function GET(req: Request) {
         const pageSize = requestedLimit
             ? collectionPageSize(requestedLimit)
             : PRODUCT_LIMITS.maxTripList
+
+        const tripVisibilityWhere = {
+            OR: [
+                { userId: currentUser.id },
+                { members: { some: { userId: currentUser.id } } },
+            ],
+        }
+        const view = url.searchParams.get("view")
+
+        if (view && !["full", "summary", "stats"].includes(view)) {
+            return NextResponse.json(
+                { error: "Unsupported trip list view." },
+                { status: 400, headers: PRIVATE_NO_STORE_HEADERS },
+            )
+        }
+
+        if (view === "summary") {
+            const trips = await prisma.trip.findMany({
+                where: tripVisibilityWhere,
+                select: {
+                    id: true,
+                    name: true,
+                    tripName: true,
+                    destination: true,
+                    startDate: true,
+                    endDate: true,
+                    budget: true,
+                    currency: true,
+                    userId: true,
+                    _count: { select: { days: true } },
+                },
+                orderBy: { updatedAt: "desc" },
+                take: pageSize + 1,
+            })
+
+            const hasMore = trips.length > pageSize
+            const visibleTrips = trips
+                .slice(0, pageSize)
+                .map((trip) => serializeTripSummaryWithOwnerCapability(trip, currentUser.id))
+
+            return NextResponse.json(visibleTrips, {
+                headers: {
+                    ...PRIVATE_NO_STORE_HEADERS,
+                    "X-Result-Limit": String(pageSize),
+                    "X-Has-More": String(hasMore),
+                    "X-Trip-View": "summary",
+                },
+            })
+        }
+
+        if (view === "stats") {
+            const [totalTrips, destinationGroups, totalDaysPlanned, totalActivities] = await Promise.all([
+                prisma.trip.count({ where: tripVisibilityWhere }),
+                prisma.trip.groupBy({
+                    by: ["destination"],
+                    where: tripVisibilityWhere,
+                    orderBy: { destination: "asc" },
+                    _count: { _all: true },
+                }),
+                prisma.day.count({ where: { trip: tripVisibilityWhere } }),
+                prisma.itineraryItem.count({ where: { day: { trip: tripVisibilityWhere } } }),
+            ])
+
+            return NextResponse.json(buildTripStatsAggregate({
+                totalTrips,
+                destinationGroups: destinationGroups.map((group) => ({
+                    destination: group.destination,
+                    tripCount: group._count._all,
+                })),
+                totalDaysPlanned,
+                totalActivities,
+            }), {
+                headers: {
+                    ...PRIVATE_NO_STORE_HEADERS,
+                    "X-Trip-View": "stats",
+                },
+            })
+        }
+
         const trips = await prisma.trip.findMany({
-            where: {
-                OR: [
-                    { userId: currentUser.id },
-                    { members: { some: { userId: currentUser.id } } },
-                ],
-            },
+            where: tripVisibilityWhere,
             select: {
                 id: true,
                 name: true,
@@ -79,20 +161,24 @@ export async function GET(req: Request) {
                 updatedAt: true,
             },
             orderBy: { updatedAt: "desc" },
-            take: Math.min(PRODUCT_LIMITS.maxTripList, pageSize + 1),
+            take: pageSize + 1,
         })
 
         const hasMore = trips.length > pageSize
-        return NextResponse.json(trips.slice(0, pageSize), {
+        const visibleTrips = trips
+            .slice(0, pageSize)
+            .map((trip) => serializeTripWithOwnerCapability(trip, currentUser.id))
+
+        return NextResponse.json(visibleTrips, {
             headers: {
-                "Cache-Control": "private, no-store",
+                ...PRIVATE_NO_STORE_HEADERS,
                 "X-Result-Limit": String(pageSize),
                 "X-Has-More": String(hasMore),
             },
         })
     } catch (error) {
         console.error("[TRIPS_GET]", error)
-        return new NextResponse("Internal Error", { status: 500 })
+        return new NextResponse("Internal Error", { status: 500, headers: PRIVATE_NO_STORE_HEADERS })
     }
 }
 
@@ -133,32 +219,50 @@ export async function POST(req: Request) {
         const body = createTripSchema.parse(json.data)
         if (currentUser.isDemo) await ensureDemoUser(prisma)
 
-        const tripCount = await prisma.trip.count({
-            where: { userId: currentUser.id },
+        const trip = await prisma.$transaction(async (tx) => {
+            const lockedUser = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+                SELECT "id" FROM "User" WHERE "id" = ${currentUser.id} FOR UPDATE
+            `)
+            if (lockedUser.length === 0) throw new Error("Trip owner not found")
+
+            const tripCount = await tx.trip.count({
+                where: { userId: currentUser.id },
+            })
+            if (tripCount >= PRODUCT_LIMITS.maxTripsPerUser) return null
+
+            return tx.trip.create({
+                data: {
+                    name: body.name,
+                    destination: body.destination,
+                    startDate: body.startDate,
+                    endDate: body.endDate,
+                    userId: currentUser.id,
+                },
+            })
         })
-        if (tripCount >= PRODUCT_LIMITS.maxTripsPerUser) {
+
+        if (!trip) {
             return NextResponse.json(
                 { error: `You can save up to ${PRODUCT_LIMITS.maxTripsPerUser} trips.` },
-                { status: 409 },
+                { status: 409, headers: PRIVATE_NO_STORE_HEADERS },
             )
         }
 
-        const trip = await prisma.trip.create({
-            data: {
-                name: body.name,
-                destination: body.destination,
-                startDate: body.startDate,
-                endDate: body.endDate,
-                userId: currentUser.id,
-            }
-        })
-
-        return NextResponse.json(trip, { status: 201 })
+        return NextResponse.json(
+            serializeTripWithOwnerCapability(trip, currentUser.id),
+            { status: 201, headers: PRIVATE_NO_STORE_HEADERS },
+        )
     } catch (error) {
         if (error instanceof z.ZodError) {
-            return NextResponse.json({ error: "Invalid trip data", issues: error.issues }, { status: 400 })
+            return NextResponse.json(
+                { error: "Invalid trip data", issues: error.issues },
+                { status: 400, headers: PRIVATE_NO_STORE_HEADERS },
+            )
         }
         console.error("[TRIPS_POST]", error)
-        return NextResponse.json({ error: "Unable to create trip" }, { status: 500 })
+        return NextResponse.json(
+            { error: "Unable to create trip" },
+            { status: 500, headers: PRIVATE_NO_STORE_HEADERS },
+        )
     }
 }

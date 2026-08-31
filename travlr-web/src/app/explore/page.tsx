@@ -16,6 +16,26 @@ import {
 export const metadata: Metadata = {
   title: "Explore Destinations | Travlr",
   description: "Find inspiration for your next trip and start planning with Travlr.",
+  alternates: {
+    canonical: "/explore",
+  },
+  openGraph: {
+    type: "website",
+    url: "/explore",
+    title: "Explore Destinations | Travlr",
+    description: "Find inspiration for your next trip and start planning with Travlr.",
+    siteName: "Travlr",
+    images: [{
+      url: "/images/destinations/lisbon.webp",
+      alt: "Lisbon rooftops beside the Atlantic",
+    }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Explore Destinations | Travlr",
+    description: "Find inspiration for your next trip and start planning with Travlr.",
+    images: ["/images/destinations/lisbon.webp"],
+  },
 }
 
 const destinations = [

@@ -152,6 +152,13 @@ export function CreateTripForm({ initialDestination = "", initialInterests = noI
             const payload: unknown = await response.json().catch(() => null)
 
             if (!response.ok) {
+                const errorCode = typeof payload === "object"
+                    && payload !== null
+                    && "code" in payload
+                    && typeof payload.code === "string"
+                    ? payload.code
+                    : ""
+
                 if (response.status === 401) {
                     const authConfigured = !(
                         typeof payload === "object"
@@ -166,6 +173,10 @@ export function CreateTripForm({ initialDestination = "", initialInterests = noI
                             : getErrorMessage(payload, "Google OAuth and NextAuth must be configured before you can sign in."),
                     })
                     return
+                }
+
+                if (errorCode === "RATE_LIMIT_UNAVAILABLE") {
+                    throw new Error(getErrorMessage(payload, "Trip generation is temporarily unavailable. Please try again."))
                 }
 
                 if (response.status === 503) {

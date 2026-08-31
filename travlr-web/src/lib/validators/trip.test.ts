@@ -109,6 +109,15 @@ describe("updateTripSchema", () => {
             expect(result.error.issues[0]?.path).toEqual(["endDate"])
         }
     })
+
+    it("allows optional trip details to be cleared", () => {
+        expect(updateTripSchema.safeParse({
+            destination: null,
+            startDate: null,
+            endDate: null,
+            budget: null,
+        }).success).toBe(true)
+    })
 })
 
 describe("tripThemeSchema", () => {

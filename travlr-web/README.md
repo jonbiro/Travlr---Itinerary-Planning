@@ -48,6 +48,7 @@ If an existing database was previously created with `prisma db push`, verify tha
 | `TRAVLR_DEMO_MODE` | Optional for local development | Set `true` to use the seeded demo user locally, or `false` to exercise the authenticated path. It is ignored in production, where API routes always require a NextAuth session. When unset, local runs use demo mode only if Google auth is not configured. |
 | `NEXTAUTH_SECRET` | Yes in deployed auth environments | Secret used by NextAuth to sign sessions. |
 | `NEXTAUTH_URL` | Yes in deployed auth environments | Canonical app URL, for example `http://localhost:3000` locally. |
+| `NEXT_PUBLIC_SITE_URL` | Recommended in production | Public canonical origin used by SEO metadata and sitemaps. Vercel falls back to its production project URL when this is omitted. |
 | `GOOGLE_CLIENT_ID` | Yes for Google sign-in | Google OAuth client ID. |
 | `GOOGLE_CLIENT_SECRET` | Yes for Google sign-in | Google OAuth client secret. |
 | `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Optional | Enables the interactive map. The dashboard shows a helpful fallback when it is unset. |
@@ -60,9 +61,9 @@ When Google/NextAuth is configured, sign in through `/api/auth/signin` before us
 
 Weather forecasts use OpenWeatherMap's geocoding and forecast APIs. If the key is missing, the weather endpoints return `503 Service Unavailable`; unknown locations return `404`, and provider failures return `502`. The UI shows those messages and does not substitute mock weather.
 
-The paid/proxied endpoints use a best-effort, process-local per-user rate limiter: chat allows 30 requests per 10 minutes, itinerary generation 5, packing lists 20, and weather 60. Exceeded limits return `429` with a `Retry-After` header. This limiter is intentionally dependency-free and bounded, so distributed or multi-instance deployments must replace `src/lib/rate-limit.ts` with a shared provider (such as Redis or the hosting platform's rate-limit service) to enforce limits across instances.
+The paid/proxied endpoints use a per-user rate limiter backed by PostgreSQL when `DATABASE_URL` is available: chat allows 30 requests per 10 minutes, itinerary generation 5, packing lists 20, and weather 60. Exceeded limits return `429` with a `Retry-After` header. Local development falls back to bounded process memory when the database is unavailable; production fails closed if the durable limiter cannot be reached so multi-instance deployments cannot silently multiply provider quota.
 
-Itinerary generation declares a 60-second function duration, while chat and packing-list generation declare 30 seconds. Configure the deployment plan to honor those limits. Weather provider requests abort after 10 seconds so an upstream outage does not hold a function open indefinitely.
+Itinerary generation declares a 60-second function duration, while chat and packing-list generation declare 30 seconds. Configure the deployment plan to honor those limits. AI and weather provider calls inherit client cancellation signals, and weather provider requests also abort after 10 seconds so a disconnected client or upstream outage does not hold a function open indefinitely.
 
 ## Development
 

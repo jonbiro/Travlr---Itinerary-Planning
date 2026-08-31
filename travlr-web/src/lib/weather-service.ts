@@ -114,12 +114,14 @@ export function clearWeatherCache() {
     weatherCache.clear()
 }
 
-async function fetchProviderJson(url: string): Promise<unknown> {
+async function fetchProviderJson(url: string, signal?: AbortSignal): Promise<unknown> {
     let response: Response
 
     try {
         response = await fetch(url, {
-            signal: AbortSignal.timeout(10_000),
+            signal: signal
+                ? AbortSignal.any([signal, AbortSignal.timeout(10_000)])
+                : AbortSignal.timeout(10_000),
         })
     } catch (error) {
         throw providerError('The weather provider is unavailable right now. Please try again later.', { cause: error })
@@ -139,7 +141,7 @@ async function fetchProviderJson(url: string): Promise<unknown> {
     return data
 }
 
-export async function getWeatherForecast(location: string): Promise<WeatherForecast> {
+export async function getWeatherForecast(location: string, signal?: AbortSignal): Promise<WeatherForecast> {
     const apiKey = process.env.OPENWEATHERMAP_API_KEY?.trim()
 
     if (!apiKey) {
@@ -164,7 +166,7 @@ export async function getWeatherForecast(location: string): Promise<WeatherForec
     try {
         // First get coordinates from the location name.
         const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(normalizedLocation)}&limit=1&appid=${apiKey}`
-        const geoData = await fetchProviderJson(geoUrl)
+        const geoData = await fetchProviderJson(geoUrl, signal)
 
         if (!Array.isArray(geoData)) {
             throw invalidProviderResponse()
@@ -191,7 +193,7 @@ export async function getWeatherForecast(location: string): Promise<WeatherForec
 
         // Get the available daily forecast (up to ten days, depending on the plan).
         const forecastUrl = `https://api.openweathermap.org/data/3.0/onecall?lat=${lat}&lon=${lon}&exclude=minutely,hourly,alerts&units=metric&appid=${apiKey}`
-        const forecastData = await fetchProviderJson(forecastUrl)
+        const forecastData = await fetchProviderJson(forecastUrl, signal)
 
         try {
             if (!isRecord(forecastData) || !isRecord(forecastData.current) || !Array.isArray(forecastData.daily)) {

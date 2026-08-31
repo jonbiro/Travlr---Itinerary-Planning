@@ -16,6 +16,7 @@ describe("consumeRateLimit", () => {
 
     afterEach(() => {
         clearRateLimitStore()
+        vi.unstubAllEnvs()
         vi.useRealTimers()
     })
 
@@ -109,5 +110,48 @@ describe("consumeRateLimit", () => {
 
         expect(first.allowed).toBe(true)
         expect(second.allowed).toBe(false)
+    })
+
+    it("fails closed when the durable production bucket is unavailable", async () => {
+        vi.stubEnv("NODE_ENV", "production")
+        const queryRaw = vi.fn().mockRejectedValue(new Error("database unavailable"))
+
+        const result = await consumeRateLimitAsync(
+            "generate:user-1",
+            { limit: 5, windowMs: 60_000 },
+            { $queryRaw: queryRaw } as never,
+        )
+
+        expect(result).toMatchObject({
+            allowed: false,
+            unavailable: true,
+            limit: 5,
+            remaining: 0,
+            retryAfterSeconds: 60,
+        })
+
+        const response = rateLimitResponse(result)
+        expect(response.status).toBe(503)
+        await expect(response.json()).resolves.toMatchObject({
+            code: "RATE_LIMIT_UNAVAILABLE",
+            retryAfterSeconds: 60,
+        })
+    })
+
+    it("fails closed in production when no durable limiter client exists", async () => {
+        vi.stubEnv("NODE_ENV", "production")
+
+        const result = await consumeRateLimitAsync(
+            "weather:user-1",
+            { limit: 60, windowMs: 60_000 },
+            null,
+        )
+
+        expect(result).toMatchObject({
+            allowed: false,
+            unavailable: true,
+            remaining: 0,
+        })
+        expect(rateLimitResponse(result).status).toBe(503)
     })
 })

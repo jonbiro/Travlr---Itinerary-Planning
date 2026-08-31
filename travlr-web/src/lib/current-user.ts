@@ -76,6 +76,9 @@ export function unauthorizedResponse() {
             code: authConfigured ? "AUTH_REQUIRED" : "AUTH_NOT_CONFIGURED",
             authConfigured,
         },
-        { status: 401 },
+        {
+            status: 401,
+            headers: { "Cache-Control": "private, no-store" },
+        },
     )
 }

@@ -7,6 +7,7 @@ import { Loader2, LockKeyhole, MapPin, Plus, RefreshCw, Settings2 } from "lucide
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import {
     Dialog,
     DialogContent,
@@ -18,9 +19,8 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { CreateTripForm, type GeneratedTrip } from "@/components/trip/create-trip-form"
+import type { GeneratedTrip } from "@/components/trip/create-trip-form"
 import { NavigationButtons } from "@/components/trip/navigation-buttons"
-import { TripCustomizationDialog } from "@/components/trip/trip-customization-dialog"
 import type { Activity, DayPlan, Trip, TripTheme } from "@/lib/types/trip"
 
 const TripsMap = dynamic(() => import("@/components/map/trips-map"), {
@@ -31,6 +31,18 @@ const TripsMap = dynamic(() => import("@/components/map/trips-map"), {
         </div>
     ),
 })
+
+const CreateTripForm = dynamic(
+    () => import("@/components/trip/create-trip-form").then((module) => module.CreateTripForm),
+    {
+        ssr: false,
+        loading: () => <p className="py-8 text-center text-sm text-muted-foreground" role="status">Loading trip planner…</p>,
+    },
+)
+const TripCustomizationDialog = dynamic(
+    () => import("@/components/trip/trip-customization-dialog").then((module) => module.TripCustomizationDialog),
+    { ssr: false },
+)
 
 const TripChat = dynamic(
     () => import("@/components/trip/trip-chat").then((module) => module.TripChat),
@@ -131,7 +143,7 @@ function mapDay(value: unknown, index: number): DayPlan {
     }
 }
 
-function mapTrip(value: unknown): Trip | null {
+function mapTrip(value: unknown, fallbackIsOwner = false): Trip | null {
     const record = asRecord(value)
     const id = record && typeof record.id === "string" ? record.id : null
     if (!record || !id) return null
@@ -142,6 +154,7 @@ function mapTrip(value: unknown): Trip | null {
 
     return {
         id,
+        isOwner: record.isOwner === true || fallbackIsOwner,
         tripName: asString(record.name || record.tripName, "Untitled trip"),
         destination: asString(record.destination, "Destination to be confirmed"),
         startDate: asString(record.startDate),
@@ -228,7 +241,10 @@ export default function DashboardPage() {
         setLoadError(null)
 
         try {
-            const response = await fetch("/api/trips", { signal: controller.signal })
+            const response = await fetch("/api/trips", {
+                cache: "no-store",
+                signal: controller.signal,
+            })
             const payload: unknown = await response.json().catch(() => null)
 
             if (!response.ok) {
@@ -259,7 +275,7 @@ export default function DashboardPage() {
             }
 
             const mappedTrips = payload
-                .map(mapTrip)
+                .map((value) => mapTrip(value))
                 .filter((value): value is Trip => value !== null)
 
             if (payload.length > 0 && mappedTrips.length === 0) {
@@ -349,7 +365,7 @@ export default function DashboardPage() {
     }, [clearCreateQuery])
 
     const handleTripCreated = useCallback((newTrip: GeneratedTrip) => {
-        const mappedTrip = mapTrip(newTrip)
+        const mappedTrip = mapTrip(newTrip, true)
         if (mappedTrip) {
             setTrips((currentTrips) => [
                 mappedTrip,
@@ -364,8 +380,15 @@ export default function DashboardPage() {
         window.history.replaceState({}, "", url)
         setIsCreateOpen(false)
         clearCreateQuery()
-        void fetchTrips()
-    }, [clearCreateQuery, fetchTrips])
+    }, [clearCreateQuery])
+
+    const handleTripUpdate = useCallback((updatedTrip: Trip) => {
+        setTrips((previousTrips) => previousTrips.map((currentTrip) => (
+            currentTrip.id === updatedTrip.id
+                ? { ...updatedTrip, isOwner: currentTrip.isOwner }
+                : currentTrip
+        )))
+    }, [])
 
     const activeTheme = trip?.theme ?? null
     const themeTint = activeTheme
@@ -375,9 +398,9 @@ export default function DashboardPage() {
         : undefined
 
     const workspace = (
-        <Tabs defaultValue="itinerary" className="flex h-full min-h-0 flex-col md:border-r">
-            <div className="overflow-x-auto border-b bg-muted/20 p-2 md:p-4">
-                <TabsList className="flex w-max min-w-full justify-start md:grid md:w-full md:grid-cols-6">
+        <Tabs defaultValue="itinerary" className="flex h-full min-h-0 flex-col lg:border-r">
+            <div className="overflow-x-auto border-b bg-muted/20 p-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:p-4">
+                <TabsList className="flex w-max min-w-full justify-start xl:grid xl:w-full xl:grid-cols-6">
                     <TabsTrigger className="shrink-0" value="itinerary">Itinerary</TabsTrigger>
                     <TabsTrigger className="shrink-0" value="weather">Weather</TabsTrigger>
                     <TabsTrigger className="shrink-0" value="expenses">Expenses</TabsTrigger>
@@ -420,22 +443,29 @@ export default function DashboardPage() {
                         <p className="truncate text-xs text-muted-foreground">
                             {trip ? `${trip.destination} • ${trip.days.length} ${trip.days.length === 1 ? "day" : "days"}` : "Create a trip to get started"}
                         </p>
+                        {trip && !trip.isOwner && (
+                            <Badge variant="secondary" className="mt-2 gap-1">
+                                <LockKeyhole className="h-3 w-3" aria-hidden="true" />
+                                Shared trip · View only
+                            </Badge>
+                        )}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                        <TripCustomizationDialog
-                            key={trip?.id || "no-trip"}
-                            tripId={trip?.id}
-                            currentTheme={trip?.theme ?? undefined}
-                            onThemeChange={(theme) => {
-                                if (!trip) return
-                                setTrips((previousTrips) => previousTrips.map((currentTrip) => (
-                                    currentTrip.id === trip.id ? { ...currentTrip, theme } : currentTrip
-                                )))
-                            }}
-                        />
+                        {trip?.isOwner && (
+                            <TripCustomizationDialog
+                                key={trip.id}
+                                tripId={trip.id}
+                                currentTheme={trip.theme ?? undefined}
+                                onThemeChange={(theme) => {
+                                    setTrips((previousTrips) => previousTrips.map((currentTrip) => (
+                                        currentTrip.id === trip.id ? { ...currentTrip, theme } : currentTrip
+                                    )))
+                                }}
+                            />
+                        )}
                         {trip && <CalendarSyncDialog trip={trip} />}
                         {trip && <ExportMenu trip={trip} />}
-                        <ShareTripDialog tripId={trip?.id} />
+                        {trip?.isOwner && <ShareTripDialog tripId={trip.id} />}
                         <Dialog open={isCreateOpen} onOpenChange={handleCreateOpenChange}>
                             <DialogTrigger asChild>
                                 <Button type="button" size="sm" variant="secondary">
@@ -450,11 +480,13 @@ export default function DashboardPage() {
                                         Tell Travlr where you’re going and what you enjoy. It will build a day-by-day starting point.
                                     </DialogDescription>
                                 </DialogHeader>
-                                <CreateTripForm
-                                    initialDestination={initialDestination}
-                                    initialInterests={initialInterests}
-                                    onSuccess={handleTripCreated}
-                                />
+                                {isCreateOpen && (
+                                    <CreateTripForm
+                                        initialDestination={initialDestination}
+                                        initialInterests={initialInterests}
+                                        onSuccess={handleTripCreated}
+                                    />
+                                )}
                             </DialogContent>
                         </Dialog>
                     </div>
@@ -463,7 +495,7 @@ export default function DashboardPage() {
                 <ScrollArea className="min-h-0 flex-1 p-4">
                     <div className="space-y-4">
                         {isLoading ? (
-                            <div className="flex items-center justify-center py-12" aria-live="polite">
+                            <div className="flex items-center justify-center py-12" role="status" aria-live="polite">
                                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" />
                                 <span className="sr-only">Loading trips</span>
                             </div>
@@ -486,7 +518,7 @@ export default function DashboardPage() {
                                                             location={activity.location}
                                                             coordinates={activity.coordinates}
                                                             variant="compact"
-                                                            className="opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                                                            className="transition-opacity"
                                                         />
                                                     )}
                                                 </div>
@@ -524,11 +556,7 @@ export default function DashboardPage() {
             </TabsContent>
 
             <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
-                <TripChat key={trip?.id ?? "no-trip"} trip={trip} onTripUpdate={(updatedTrip) => {
-                    setTrips((previousTrips) => previousTrips.map((currentTrip) => (
-                        currentTrip.id === updatedTrip.id ? updatedTrip : currentTrip
-                    )))
-                }} />
+                <TripChat key={trip?.id ?? "no-trip"} trip={trip} onTripUpdate={handleTripUpdate} />
             </TabsContent>
 
             <TabsContent value="packing" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
@@ -561,10 +589,10 @@ export default function DashboardPage() {
     )
 
     return (
-        <main className="h-[calc(100vh-4rem)] min-h-[36rem] w-full">
-            <div className="grid h-full min-h-0 md:grid-cols-[minmax(20rem,0.42fr)_minmax(0,0.58fr)]">
+        <main className="h-[calc(100dvh-4rem)] min-h-[36rem] w-full">
+            <div className="grid h-full min-h-0 lg:grid-cols-[minmax(32rem,0.54fr)_minmax(0,0.46fr)]">
                 <section className="min-h-0 min-w-0">{workspace}</section>
-                <aside className="hidden min-h-0 min-w-0 p-4 md:block" aria-label="Trip map">
+                <aside className="hidden min-h-0 min-w-0 p-4 lg:block" aria-label="Trip map">
                     <TripsMap trip={trip} />
                 </aside>
             </div>

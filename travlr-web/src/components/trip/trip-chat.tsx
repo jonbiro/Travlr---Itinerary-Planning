@@ -3,7 +3,14 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useChat } from "@ai-sdk/react"
-import { DefaultChatTransport, getToolName, isToolUIPart } from "ai"
+import {
+    DefaultChatTransport,
+    getToolName,
+    isToolUIPart,
+    type UIDataTypes,
+    type UIMessagePart,
+    type UITools,
+} from "ai"
 import { Check, Loader2, MapPin, RefreshCw, Send, X } from "lucide-react"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -19,6 +26,24 @@ interface TripChatProps {
 }
 
 type AuthState = "auth" | "setup"
+
+type ChatMessageSnapshot = {
+    id: string
+    role: string
+    parts: readonly UIMessagePart<UIDataTypes, UITools>[]
+}
+
+type MessageCursor = {
+    tripId: string | null
+    nextMessageIndex: number
+    tailMessageId: string | null
+    ignoredMessageIds: ReadonlySet<string>
+}
+
+type ItineraryToolUpdate = {
+    toolCallId: string
+    updatedTrip: Trip
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -56,10 +81,91 @@ function classifyChatAuthError(error: Error | undefined): AuthState | null {
     return null
 }
 
+export function collectNewItineraryToolResults(
+    messages: readonly ChatMessageSnapshot[],
+    currentTripId: string | null,
+    cursor: MessageCursor,
+    handledToolCalls: ReadonlySet<string>,
+): {
+    updates: ItineraryToolUpdate[]
+    newToolCallIds: string[]
+    cursor: MessageCursor
+    reset: boolean
+} {
+    if (cursor.tripId !== currentTripId) {
+        return {
+            updates: [],
+            newToolCallIds: [],
+            cursor: {
+                tripId: currentTripId,
+                nextMessageIndex: messages.length,
+                tailMessageId: messages[messages.length - 1]?.id ?? null,
+                ignoredMessageIds: new Set(messages.map((message) => message.id)),
+            },
+            reset: true,
+        }
+    }
+
+    const previousMessageCount = cursor.nextMessageIndex
+    const previousTailAtIndex = previousMessageCount > 0
+        ? messages[previousMessageCount - 1]?.id ?? null
+        : null
+    const messageListWasReplaced = previousMessageCount > messages.length
+        || (previousMessageCount > 0 && previousTailAtIndex !== cursor.tailMessageId)
+    // The active assistant message is updated in place while it streams. Keep
+    // a one-message overlap so an input part can be revisited when it becomes
+    // an output, without rescanning the completed conversation.
+    const startIndex = messageListWasReplaced
+        ? 0
+        : Math.max(0, previousMessageCount - 1)
+    const seenToolCalls = new Set(handledToolCalls)
+    const updates: ItineraryToolUpdate[] = []
+    const newToolCallIds: string[] = []
+
+    for (const message of messages.slice(startIndex)) {
+        if (cursor.ignoredMessageIds.has(message.id)) continue
+        if (message.role !== "assistant") continue
+
+        for (const part of message.parts) {
+            if (!isToolUIPart(part) || getToolName(part) !== "updateItinerary") continue
+            if (part.state !== "output-available" || seenToolCalls.has(part.toolCallId)) continue
+            if (!isRecord(part.output) || !isRecord(part.output.updatedTrip)) continue
+
+            seenToolCalls.add(part.toolCallId)
+            newToolCallIds.push(part.toolCallId)
+            updates.push({
+                toolCallId: part.toolCallId,
+                updatedTrip: part.output.updatedTrip as unknown as Trip,
+            })
+        }
+    }
+
+    return {
+        updates,
+        newToolCallIds,
+        cursor: {
+            tripId: currentTripId,
+            nextMessageIndex: messages.length,
+            tailMessageId: messages[messages.length - 1]?.id ?? null,
+            ignoredMessageIds: cursor.ignoredMessageIds,
+        },
+        reset: false,
+    }
+}
+
 export function TripChat({ trip, onTripUpdate }: TripChatProps) {
     const [input, setInput] = useState("")
     const [authState, setAuthState] = useState<AuthState | null>(null)
     const handledToolCalls = useRef(new Set<string>())
+    const pendingTripUpdates = useRef(new Map<string, Trip>())
+    const currentTripId = trip?.id ?? null
+    const messageCursor = useRef<MessageCursor>({
+        tripId: currentTripId,
+        nextMessageIndex: 0,
+        tailMessageId: null,
+        ignoredMessageIds: new Set(),
+    })
+    const onTripUpdateRef = useRef(onTripUpdate)
     const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat" }), [])
     const { error, messages, regenerate, sendMessage, status } = useChat({ transport })
     const isLoading = status === "submitted" || status === "streaming"
@@ -69,21 +175,47 @@ export function TripChat({ trip, onTripUpdate }: TripChatProps) {
     }, [error])
 
     useEffect(() => {
+        const result = collectNewItineraryToolResults(
+            messages,
+            currentTripId,
+            messageCursor.current,
+            handledToolCalls.current,
+        )
+
+        messageCursor.current = result.cursor
+        if (result.reset) {
+            // Do not replay results that belong to the previous trip if the
+            // chat hook keeps its message history while the trip changes.
+            handledToolCalls.current.clear()
+            pendingTripUpdates.current.clear()
+            return
+        }
+
+        for (const toolCallId of result.newToolCallIds) {
+            handledToolCalls.current.add(toolCallId)
+        }
+        for (const update of result.updates) {
+            pendingTripUpdates.current.set(update.toolCallId, update.updatedTrip)
+        }
+
+        const updateTrip = onTripUpdateRef.current
+        if (!updateTrip) return
+
+        for (const [toolCallId, updatedTrip] of pendingTripUpdates.current) {
+            pendingTripUpdates.current.delete(toolCallId)
+            updateTrip(updatedTrip)
+        }
+    }, [currentTripId, messages])
+
+    useEffect(() => {
+        onTripUpdateRef.current = onTripUpdate
         if (!onTripUpdate) return
 
-        for (const message of messages) {
-            if (message.role !== "assistant") continue
-
-            for (const part of message.parts) {
-                if (!isToolUIPart(part) || getToolName(part) !== "updateItinerary") continue
-                if (part.state !== "output-available" || handledToolCalls.current.has(part.toolCallId)) continue
-                if (!isRecord(part.output) || !isRecord(part.output.updatedTrip)) continue
-
-                handledToolCalls.current.add(part.toolCallId)
-                onTripUpdate(part.output.updatedTrip as unknown as Trip)
-            }
+        for (const [toolCallId, updatedTrip] of pendingTripUpdates.current) {
+            pendingTripUpdates.current.delete(toolCallId)
+            onTripUpdate(updatedTrip)
         }
-    }, [messages, onTripUpdate])
+    }, [onTripUpdate])
 
     const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault()

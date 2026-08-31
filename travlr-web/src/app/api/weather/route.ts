@@ -4,6 +4,8 @@ import { getWeatherForecast, WeatherServiceError } from '@/lib/weather-service'
 import { getPrismaClient } from '@/lib/prisma'
 import { consumeRateLimitAsync, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit'
 
+const PRIVATE_NO_STORE_HEADERS = { 'Cache-Control': 'private, no-store' }
+
 export async function GET(request: Request) {
     const currentUser = await getCurrentUser()
     if (!currentUser) return unauthorizedResponse()
@@ -22,12 +24,12 @@ export async function GET(request: Request) {
     if (!location) {
         return NextResponse.json(
             { error: 'A valid location is required to load weather.', code: 'INVALID_LOCATION' },
-            { status: 400 }
+            { status: 400, headers: PRIVATE_NO_STORE_HEADERS }
         )
     }
 
     try {
-        const forecast = await getWeatherForecast(location)
+        const forecast = await getWeatherForecast(location, request.signal)
         return NextResponse.json(forecast, {
             headers: {
                 "Cache-Control": "private, max-age=300, stale-if-error=3600",
@@ -37,7 +39,7 @@ export async function GET(request: Request) {
         if (error instanceof WeatherServiceError) {
             return NextResponse.json(
                 { error: error.message, code: error.code },
-                { status: error.status },
+                { status: error.status, headers: PRIVATE_NO_STORE_HEADERS },
             )
         }
 
@@ -46,7 +48,7 @@ export async function GET(request: Request) {
                 error: 'The weather provider is unavailable right now. Please try again later.',
                 code: 'WEATHER_PROVIDER_ERROR',
             },
-            { status: 502 },
+            { status: 502, headers: PRIVATE_NO_STORE_HEADERS },
         )
     }
 }

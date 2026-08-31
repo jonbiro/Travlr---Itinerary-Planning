@@ -121,6 +121,7 @@ export function TripCustomizationDialog({
     const [saveError, setSaveError] = useState<string | null>(null)
     const [authState, setAuthState] = useState<AuthState | null>(null)
     const [open, setOpen] = useState(false)
+    const [statusMessage, setStatusMessage] = useState("")
 
     const resetDraft = () => {
         const nextTheme = currentTheme || presetThemes[0].theme
@@ -136,6 +137,7 @@ export function TripCustomizationDialog({
 
         resetDraft()
         setOpen(nextOpen)
+        if (nextOpen) setStatusMessage("")
     }
 
     const handleSelectPresetTheme = (theme: TripTheme) => {
@@ -153,11 +155,14 @@ export function TripCustomizationDialog({
 
     const handleCustomColor = () => {
         if (!isValidHexColor(customColor)) {
-            setSaveError("Use a six-digit hex color, such as #3b82f6.")
+            const message = "Use a six-digit hex color, such as #3b82f6."
+            setSaveError(message)
+            setStatusMessage(message)
             return
         }
 
         setSaveError(null)
+        setStatusMessage("Custom color applied to the preview.")
         setSelectedTheme({
             backgroundColor: customColor,
             accentColor: customColor,
@@ -169,6 +174,7 @@ export function TripCustomizationDialog({
     const handleCustomImage = () => {
         if (customImageUrl) {
             setSaveError(null)
+            setStatusMessage("Custom background image applied to the preview.")
             setSelectedTheme({
                 ...selectedTheme,
                 backgroundImage: customImageUrl,
@@ -178,13 +184,16 @@ export function TripCustomizationDialog({
 
     const handleSave = async () => {
         if (!tripId) {
-            setSaveError("Select a trip before saving its appearance.")
+            const message = "Select a trip before saving its appearance."
+            setSaveError(message)
+            setStatusMessage(message)
             return
         }
 
         setIsSaving(true)
         setSaveError(null)
         setAuthState(null)
+        setStatusMessage("Saving trip appearance.")
         try {
             const response = await fetch(`/api/trip/${encodeURIComponent(tripId)}/theme`, {
                 method: "PUT",
@@ -208,15 +217,19 @@ export function TripCustomizationDialog({
             }
 
             onThemeChange?.(selectedTheme)
+            setStatusMessage("Trip appearance saved.")
             setOpen(false)
         } catch (error) {
-            setSaveError(error instanceof Error ? error.message : "Unable to save the trip appearance.")
+            const message = error instanceof Error ? error.message : "Unable to save the trip appearance."
+            setSaveError(message)
+            setStatusMessage(message)
         } finally {
             setIsSaving(false)
         }
     }
 
     return (
+        <>
         <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogTrigger asChild>
                 <Button type="button" variant="outline" size="sm" className="gap-2" disabled={!tripId}>
@@ -247,19 +260,20 @@ export function TripCustomizationDialog({
                     <TabsContent value="colors" className="space-y-4 pt-4">
                         {/* Preview */}
                         <div
-                            className="h-24 rounded-lg flex items-center justify-center text-white font-medium"
+                            className="relative flex h-24 items-center justify-center overflow-hidden rounded-lg font-medium text-white"
                             style={{
                                 background: selectedTheme.gradientFrom
                                     ? `linear-gradient(135deg, ${selectedTheme.gradientFrom}, ${selectedTheme.gradientTo})`
                                     : selectedTheme.backgroundColor,
                             }}
                         >
-                            Preview
+                            <div className="absolute inset-0 bg-black/60" aria-hidden="true" />
+                            <span className="relative">Preview</span>
                         </div>
 
                         {/* Preset Themes */}
-                        <div>
-                            <Label className="text-sm font-medium mb-2 block">Preset Themes</Label>
+                        <div role="group" aria-labelledby="preset-themes-label">
+                            <Label id="preset-themes-label" className="text-sm font-medium mb-2 block">Preset Themes</Label>
                             <div className="grid grid-cols-6 gap-2">
                                 {presetThemes.map((preset) => (
                                     <button
@@ -288,21 +302,25 @@ export function TripCustomizationDialog({
                         </div>
 
                         {/* Custom Color */}
-                        <div>
-                            <Label className="text-sm font-medium mb-2 block">Custom Color</Label>
+                        <div role="group" aria-labelledby="custom-color-label">
+                            <Label id="custom-color-label" htmlFor="custom-color-picker" className="text-sm font-medium mb-2 block">Custom Color</Label>
                             <div className="flex gap-2">
                                 <Input
+                                    id="custom-color-picker"
                                     type="color"
                                     value={customColor}
                                     onChange={(e) => setCustomColor(e.target.value)}
                                     className="w-12 h-10 p-1 cursor-pointer"
+                                    aria-label="Choose custom color"
                                 />
                                 <Input
+                                    id="custom-color-hex"
                                     type="text"
                                     value={customColor}
                                     onChange={(e) => setCustomColor(e.target.value)}
                                     placeholder="#3b82f6"
                                     className="flex-1"
+                                    aria-label="Custom color hex value"
                                 />
                                 <Button type="button" variant="secondary" onClick={handleCustomColor}>
                                     Apply
@@ -314,7 +332,7 @@ export function TripCustomizationDialog({
                     <TabsContent value="images" className="space-y-4 pt-4">
                         {/* Preview */}
                         <div
-                            className="h-24 rounded-lg flex items-center justify-center text-white font-medium bg-cover bg-center relative overflow-hidden"
+                            className="relative flex h-24 items-center justify-center overflow-hidden rounded-lg bg-cover bg-center font-medium text-white"
                             style={{
                                 backgroundImage: selectedTheme.backgroundImage
                                     ? `url(${selectedTheme.backgroundImage})`
@@ -322,13 +340,13 @@ export function TripCustomizationDialog({
                                 backgroundColor: selectedTheme.backgroundColor,
                             }}
                         >
-                            <div className="absolute inset-0 bg-black/30" />
+                            <div className="absolute inset-0 bg-black/60" aria-hidden="true" />
                             <span className="relative">Preview</span>
                         </div>
 
                         {/* Preset Images */}
-                        <div>
-                            <Label className="text-sm font-medium mb-2 block">Preset Backgrounds</Label>
+                        <div role="group" aria-labelledby="preset-backgrounds-label">
+                            <Label id="preset-backgrounds-label" className="text-sm font-medium mb-2 block">Preset Backgrounds</Label>
                             <div className="grid grid-cols-3 gap-2">
                                 {presetImages.map((img) => (
                                     <button
@@ -358,9 +376,10 @@ export function TripCustomizationDialog({
 
                         {/* Custom Image URL */}
                         <div>
-                            <Label className="text-sm font-medium mb-2 block">Custom Image URL</Label>
+                            <Label htmlFor="custom-image-url" className="text-sm font-medium mb-2 block">Custom Image URL</Label>
                             <div className="flex gap-2">
                                 <Input
+                                    id="custom-image-url"
                                     type="url"
                                     value={customImageUrl}
                                     onChange={(e) => setCustomImageUrl(e.target.value)}
@@ -408,20 +427,30 @@ export function TripCustomizationDialog({
                             )}
                         </div>
                     ) : saveError ? (
-                        <p role="alert" className="mr-auto text-sm text-destructive">
+                        <p id="trip-theme-error" role="alert" className="mr-auto text-sm text-destructive">
                             {saveError}
                         </p>
                     ) : null}
                     <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
                         Cancel
                     </Button>
-                    <Button type="button" onClick={handleSave} disabled={isSaving || !tripId}>
-                        {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                        Save Theme
+                    <Button type="button" onClick={handleSave} disabled={isSaving || !tripId} aria-busy={isSaving}>
+                        {isSaving ? (
+                            <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
+                                Saving…
+                            </>
+                        ) : (
+                            "Save Theme"
+                        )}
                     </Button>
                 </div>
             </DialogContent>
         </Dialog>
+        <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+            {statusMessage}
+        </p>
+        </>
     )
 }
 

@@ -79,6 +79,8 @@ const calendarOptions = [
 export function CalendarSyncDialog({ trip, className }: CalendarSyncDialogProps) {
     const [isExporting, setIsExporting] = useState<string | null>(null)
     const [dialogOpen, setDialogOpen] = useState(false)
+    const [exportError, setExportError] = useState<string | null>(null)
+    const [statusMessage, setStatusMessage] = useState("")
 
     if (!trip || !trip.days || trip.days.length === 0) {
         return null
@@ -93,6 +95,9 @@ export function CalendarSyncDialog({ trip, className }: CalendarSyncDialogProps)
         if (events.length === 0) return
 
         setIsExporting(optionId)
+        setExportError(null)
+        const option = calendarOptions.find((calendarOption) => calendarOption.id === optionId)
+        setStatusMessage(`${option?.name ?? "Calendar"} export in progress.`)
 
         try {
             switch (optionId) {
@@ -126,16 +131,29 @@ export function CalendarSyncDialog({ trip, className }: CalendarSyncDialogProps)
                     downloadICalFile(events, trip.tripName)
                     break
             }
+            setStatusMessage(`${option?.name ?? "Calendar"} export started.`)
             setDialogOpen(false)
         } catch (error) {
-            console.error("Calendar export failed:", error)
+            const message = error instanceof Error ? error.message : "Calendar export failed."
+            setExportError(message)
+            setStatusMessage(message)
         } finally {
             setTimeout(() => setIsExporting(null), 1000)
         }
     }
 
     return (
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <>
+        <Dialog
+            open={dialogOpen}
+            onOpenChange={(nextOpen) => {
+                setDialogOpen(nextOpen)
+                if (nextOpen) {
+                    setExportError(null)
+                    setStatusMessage("")
+                }
+            }}
+        >
             <DialogTrigger asChild>
                 <Button variant="outline" size="sm" className={cn("gap-2", className)}>
                     <CalendarArrowUp className="h-4 w-4" aria-hidden="true" />
@@ -171,20 +189,30 @@ export function CalendarSyncDialog({ trip, className }: CalendarSyncDialogProps)
                                 <p className="text-xs text-muted-foreground">{option.description}</p>
                             </div>
                             {isExporting === option.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden="true" />
                             ) : option.action === "download" ? (
-                                <Download className="h-4 w-4 text-muted-foreground" />
+                                <Download className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                             ) : (
-                                <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                                <ExternalLink className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                             )}
                         </button>
                     ))}
                 </div>
+
+                {exportError && (
+                    <p className="text-sm text-destructive" role="alert">
+                        {exportError}
+                    </p>
+                )}
 
                 <p className="text-xs text-muted-foreground mt-4 text-center">
                     For multiple events, the full itinerary is also downloaded as an .ics file. The .ics file preserves these floating local times for calendar apps that support them.
                 </p>
             </DialogContent>
         </Dialog>
+        <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+            {statusMessage}
+        </p>
+        </>
     )
 }

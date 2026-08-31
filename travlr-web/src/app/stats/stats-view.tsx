@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import {
     Activity,
@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
+import type { TripStatsAggregate } from "@/lib/trip-stats"
 
 export interface StatsTrip {
     destination: string | null
@@ -27,13 +28,7 @@ export interface StatsTrip {
     activityCount: number
 }
 
-export interface TravelStats {
-    totalTrips: number
-    totalDestinations: number
-    totalDaysPlanned: number
-    totalActivities: number
-    topDestinations: { name: string; tripCount: number }[]
-}
+export type TravelStats = TripStatsAggregate
 
 export type StatsLoadError = {
     kind: "auth" | "setup" | "generic"
@@ -41,7 +36,7 @@ export type StatsLoadError = {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-    return value !== null && typeof value === "object"
+    return value !== null && typeof value === "object" && !Array.isArray(value)
         ? value as Record<string, unknown>
         : null
 }
@@ -89,6 +84,53 @@ export function normalizeTrips(payload: unknown): StatsTrip[] {
     }
 
     return trips
+}
+
+function asNonNegativeInteger(value: unknown): number | null {
+    return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null
+}
+
+/**
+ * Normalize the aggregate response returned by `GET /api/trips?view=stats`.
+ * Stats no longer depends on a full trip/day/activity graph being present.
+ */
+export function normalizeTravelStats(payload: unknown): TravelStats {
+    const record = asRecord(payload)
+    const totalTrips = asNonNegativeInteger(record?.totalTrips)
+    const totalDestinations = asNonNegativeInteger(record?.totalDestinations)
+    const totalDaysPlanned = asNonNegativeInteger(record?.totalDaysPlanned)
+    const totalActivities = asNonNegativeInteger(record?.totalActivities)
+    const rawTopDestinations = record?.topDestinations
+
+    if (
+        totalTrips === null
+        || totalDestinations === null
+        || totalDaysPlanned === null
+        || totalActivities === null
+        || !Array.isArray(rawTopDestinations)
+    ) {
+        throw new Error("We received an unexpected stats response.")
+    }
+
+    const topDestinations = rawTopDestinations.map((value) => {
+        const destination = asRecord(value)
+        const name = asOptionalString(destination?.name)
+        const tripCount = asNonNegativeInteger(destination?.tripCount)
+
+        return name && tripCount !== null ? { name, tripCount } : null
+    })
+
+    if (topDestinations.some((destination) => destination === null)) {
+        throw new Error("We received an unexpected stats response.")
+    }
+
+    return {
+        totalTrips,
+        totalDestinations,
+        totalDaysPlanned,
+        totalActivities,
+        topDestinations: topDestinations as { name: string; tripCount: number }[],
+    }
 }
 
 export function deriveTravelStats(trips: StatsTrip[]): TravelStats {
@@ -223,7 +265,7 @@ function EmptyState() {
 }
 
 export function TravelStatsDashboard() {
-    const [trips, setTrips] = useState<StatsTrip[]>([])
+    const [stats, setStats] = useState<TravelStats | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [error, setError] = useState<StatsLoadError | null>(null)
     const requestRef = useRef<AbortController | null>(null)
@@ -236,7 +278,7 @@ export function TravelStatsDashboard() {
         setError(null)
 
         try {
-            const response = await fetch("/api/trips", {
+            const response = await fetch("/api/trips?view=stats", {
                 cache: "no-store",
                 signal: controller.signal,
             })
@@ -249,7 +291,9 @@ export function TravelStatsDashboard() {
                     : "We couldn’t load your trips right now."
                 const code = typeof record?.code === "string" ? record.code : ""
                 const lowerMessage = responseMessage.toLowerCase()
-                const kind: StatsLoadError["kind"] = response.status === 503
+                const kind: StatsLoadError["kind"] = code === "RATE_LIMIT_UNAVAILABLE"
+                    ? "generic"
+                    : response.status === 503
                     || code === "DATABASE_NOT_CONFIGURED"
                     || lowerMessage.includes("database is not configured")
                     ? "setup"
@@ -272,14 +316,14 @@ export function TravelStatsDashboard() {
                 } satisfies StatsLoadError
             }
 
-            const normalizedTrips = normalizeTrips(payload)
+            const normalizedStats = normalizeTravelStats(payload)
             if (controller.signal.aborted) return
 
-            setTrips(normalizedTrips)
+            setStats(normalizedStats)
         } catch (loadError) {
             if (controller.signal.aborted || (loadError instanceof Error && loadError.name === "AbortError")) return
 
-            setTrips([])
+            setStats(null)
             setError(
                 typeof loadError === "object" && loadError !== null && "kind" in loadError && "message" in loadError
                     ? loadError as StatsLoadError
@@ -305,14 +349,12 @@ export function TravelStatsDashboard() {
         }
     }, [loadTrips])
 
-    const stats = useMemo(() => deriveTravelStats(trips), [trips])
-
     if (isLoading) return <LoadingState />
     if (error) {
         if (error.kind !== "generic") return <AccessState error={error} onRetry={() => void loadTrips()} />
         return <ErrorState message={error.message} onRetry={() => void loadTrips()} />
     }
-    if (trips.length === 0) return <EmptyState />
+    if (!stats || stats.totalTrips === 0) return <EmptyState />
 
     return (
         <div className="space-y-6" aria-live="polite">

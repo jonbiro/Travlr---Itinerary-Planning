@@ -26,6 +26,7 @@ export interface DayPlan {
 
 export interface Trip {
     id: string
+    isOwner: boolean
     tripName: string // or name
     destination: string
     startDate: string // ISO string

@@ -1,5 +1,5 @@
 import { openai } from "@ai-sdk/openai"
-import { convertToModelMessages, safeValidateUIMessages, stepCountIs, streamText, tool, type UIMessage } from "ai"
+import { consumeStream, convertToModelMessages, safeValidateUIMessages, stepCountIs, streamText, tool, type UIMessage } from "ai"
 import { z } from "zod"
 
 import { getCurrentUser, unauthorizedResponse } from "@/lib/current-user"
@@ -163,6 +163,8 @@ export async function POST(req: Request) {
         const tripId = isRecord(trip) && typeof trip.id === "string" && trip.id.trim().length > 0
             ? trip.id.trim()
             : null
+        let cumulativeTrip = cloneTrip(trip)
+        let itineraryUpdateQueue: Promise<void> = Promise.resolve()
 
         const tools = {
             getWeather: tool({
@@ -170,9 +172,27 @@ export async function POST(req: Request) {
                 inputSchema: z.object({
                     location: z.string().describe("The city and state, e.g. San Francisco, CA"),
                 }),
-                execute: async ({ location }: { location: string }) => {
+                execute: async ({ location }: { location: string }, { abortSignal }) => {
+                    const weatherLimit = await consumeRateLimitAsync(
+                        `weather:${currentUser.id}`,
+                        RATE_LIMITS.weather,
+                        prisma,
+                    )
+                    if (!weatherLimit.allowed) {
+                        const limiterUnavailable = weatherLimit.unavailable === true
+                        return {
+                            success: false,
+                            error: limiterUnavailable
+                                ? "Weather request protection is temporarily unavailable. Please try again later."
+                                : "Too many weather requests. Please try again in a few minutes.",
+                            code: limiterUnavailable ? "RATE_LIMIT_UNAVAILABLE" : "RATE_LIMITED",
+                            retryAfterSeconds: weatherLimit.retryAfterSeconds,
+                            location,
+                        }
+                    }
+
                     try {
-                        const forecast = await getWeatherForecast(location)
+                        const forecast = await getWeatherForecast(location, abortSignal)
                         return {
                             success: true,
                             temperature: forecast.current.temp,
@@ -204,7 +224,8 @@ export async function POST(req: Request) {
             updateItinerary: tool({
                 description: "Update the trip itinerary with new activities",
                 inputSchema: itineraryChangeSchema.describe("The itinerary change to apply"),
-                execute: async (change: ItineraryChange) => {
+                execute: (change: ItineraryChange) => {
+                    const operation = itineraryUpdateQueue.then(async () => {
                     if (!tripId) {
                         return {
                             success: false,
@@ -239,7 +260,7 @@ export async function POST(req: Request) {
                     // Return the same lightweight shape the dashboard supplied,
                     // so it can update immediately while the database remains
                     // the source of truth for the next reload.
-                    const updatedTrip = cloneTrip(trip)
+                    const updatedTrip = cloneTrip(cumulativeTrip)
                     const days = Array.isArray(updatedTrip.days) ? updatedTrip.days : []
                     updatedTrip.days = days
 
@@ -272,6 +293,8 @@ export async function POST(req: Request) {
                         ))
                     }
 
+                    cumulativeTrip = updatedTrip
+
                     return {
                         success: true,
                         message: persisted.message,
@@ -279,6 +302,16 @@ export async function POST(req: Request) {
                         day: change.day,
                         action: change.action,
                     }
+                    })
+
+                    // Models may emit multiple tool calls in one step. Queue
+                    // them so each response builds on the last persisted/UI
+                    // snapshot instead of replaying the original request trip.
+                    itineraryUpdateQueue = operation.then(
+                        () => undefined,
+                        () => undefined,
+                    )
+                    return operation
                 },
             }),
         }
@@ -298,6 +331,7 @@ export async function POST(req: Request) {
         const messages = validatedMessages.data as UIMessage[]
         const result = streamText({
             model: openai(process.env.OPENAI_MODEL?.trim() || "gpt-5.6-luna"),
+            abortSignal: req.signal,
             messages: await convertToModelMessages(messages, { tools }),
             maxOutputTokens: 1_200,
             // Allow a tool result to be followed by a concise assistant reply,
@@ -311,7 +345,10 @@ Current Trip Context: ${JSON.stringify(compactTripContext(trip), null, 2)}`,
             tools,
         })
 
-        return result.toUIMessageStreamResponse()
+        return result.toUIMessageStreamResponse({
+            consumeSseStream: consumeStream,
+            headers: { "Cache-Control": "private, no-store" },
+        })
     } catch (error) {
         console.error("Chat API error:", error)
         return Response.json({ error: "Unable to process chat request." }, { status: 500 })

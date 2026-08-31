@@ -17,6 +17,7 @@ export type RateLimitConfig = {
 
 export type RateLimitResult = {
     allowed: boolean
+    unavailable?: boolean
     limit: number
     remaining: number
     resetAt: number
@@ -170,14 +171,26 @@ function resultFromDurableBucket(row: DurableRateLimitRow, now: number): RateLim
     }
 }
 
+function unavailableRateLimit(config: RateLimitConfig, now: number): RateLimitResult {
+    return {
+        allowed: false,
+        unavailable: true,
+        limit: config.limit,
+        remaining: 0,
+        resetAt: now + config.windowMs,
+        retryAfterSeconds: Math.max(1, Math.ceil(config.windowMs / 1_000)),
+    }
+}
+
 /**
  * Atomically consume a bucket shared by all application instances.
  *
  * The INSERT ... ON CONFLICT statement increments an existing window in one
  * database operation, so concurrent requests cannot both observe the same
  * count. If a deployment has not applied the durable limiter migration yet,
- * the route remains protected by the bounded process-local fallback instead
- * of failing open.
+ * development can still use the bounded process-local fallback. Production
+ * fails closed and reports the limiter as unavailable instead of pretending
+ * the caller exhausted a quota.
  */
 export async function consumeRateLimitAsync(
     key: string,
@@ -187,7 +200,11 @@ export async function consumeRateLimitAsync(
 ): Promise<RateLimitResult> {
     validateConfig(config)
 
-    if (!prisma) return consumeRateLimit(key, config, now)
+    if (!prisma) {
+        return process.env.NODE_ENV === "production"
+            ? unavailableRateLimit(config, now)
+            : consumeRateLimit(key, config, now)
+    }
 
     try {
         const rows = await prisma.$queryRaw<DurableRateLimitRow[]>(Prisma.sql`
@@ -232,26 +249,38 @@ export async function consumeRateLimitAsync(
         await pruneDurableBuckets(prisma, now)
         return result
     } catch (error) {
-        // Missing migrations, a temporarily unavailable database, or a test
-        // double that does not implement $queryRaw should never make an
-        // expensive endpoint fail open. The bounded fallback still protects
-        // the current process while the deployment is repaired.
+        // A local fallback is useful for development, but it is not shared
+        // across production instances. Fail closed in production so a missing
+        // migration or database outage cannot silently multiply AI/provider
+        // quota across every running instance.
         if (process.env.NODE_ENV !== "test") {
-            console.warn("[RATE_LIMIT] Durable bucket unavailable; using local fallback", error)
+            console.warn(
+                process.env.NODE_ENV === "production"
+                    ? "[RATE_LIMIT] Durable bucket unavailable; blocking production request"
+                    : "[RATE_LIMIT] Durable bucket unavailable; using local fallback",
+                error,
+            )
+        }
+        if (process.env.NODE_ENV === "production") {
+            return unavailableRateLimit(config, now)
         }
         return consumeRateLimit(key, config, now)
     }
 }
 
 export function rateLimitResponse(result: RateLimitResult) {
+    const unavailable = result.unavailable === true
+
     return Response.json(
         {
-            error: "Too many requests. Please try again later.",
-            code: "RATE_LIMITED",
+            error: unavailable
+                ? "Request protection is temporarily unavailable. Please try again later."
+                : "Too many requests. Please try again later.",
+            code: unavailable ? "RATE_LIMIT_UNAVAILABLE" : "RATE_LIMITED",
             retryAfterSeconds: result.retryAfterSeconds,
         },
         {
-            status: 429,
+            status: unavailable ? 503 : 429,
             headers: {
                 "Cache-Control": "no-store",
                 "Retry-After": String(result.retryAfterSeconds),

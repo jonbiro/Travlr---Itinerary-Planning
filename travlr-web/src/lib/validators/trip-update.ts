@@ -10,10 +10,10 @@ import { inclusiveUtcDayCount, PRODUCT_LIMITS } from "@/lib/product-limits"
  */
 export const updateTripSchema = z.object({
     name: z.string().trim().min(1, "Trip name must not be empty").max(200).optional(),
-    destination: z.string().trim().min(1, "Destination must not be empty").max(200).optional(),
-    startDate: dateOnlySchema.optional(),
-    endDate: dateOnlySchema.optional(),
-    budget: z.number().finite().nonnegative("Budget must be zero or greater").optional(),
+    destination: z.string().trim().min(1, "Destination must not be empty").max(200).nullable().optional(),
+    startDate: dateOnlySchema.nullable().optional(),
+    endDate: dateOnlySchema.nullable().optional(),
+    budget: z.number().finite().nonnegative("Budget must be zero or greater").nullable().optional(),
 }).strict().refine(({ startDate, endDate }) => (
     !startDate || !endDate || endDate >= startDate
 ), {

@@ -1,24 +1,34 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist } from "next/font/google";
 import "./globals.css";
 import { Navbar } from "@/components/navbar";
 import { Toaster } from "@/components/ui/sonner";
 import { ServiceWorkerRegistration } from "@/components/pwa/service-worker-registration";
 import { InstallPrompt } from "@/components/pwa/install-prompt";
+import { isAuthConfigured } from "@/lib/auth";
+import { isDemoMode } from "@/lib/current-user";
+import { getSiteUrl, isPreviewDeployment } from "@/lib/site-url";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+const siteUrl = getSiteUrl();
+
+const siteDescription = "Plan your perfect trip with AI-powered itinerary generation, expense tracking, and travel memories";
+const socialImage = "/images/hero-travel-planning.webp";
 
 export const metadata: Metadata = {
+  metadataBase: siteUrl,
   title: "Travlr - AI Travel Planner",
-  description: "Plan your perfect trip with AI-powered itinerary generation, expense tracking, and travel memories",
+  description: siteDescription,
+  alternates: {
+    canonical: "/",
+  },
+  robots: isPreviewDeployment()
+    ? { index: false, follow: false }
+    : { index: true, follow: true },
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
@@ -30,14 +40,20 @@ export const metadata: Metadata = {
   },
   openGraph: {
     type: "website",
+    url: "/",
     title: "Travlr - AI Travel Planner",
     description: "Plan your perfect trip with AI-powered itinerary generation",
     siteName: "Travlr",
+    images: [{
+      url: socialImage,
+      alt: "Friends planning a trip together with Travlr",
+    }],
   },
   twitter: {
     card: "summary_large_image",
     title: "Travlr - AI Travel Planner",
     description: "Plan your perfect trip with AI-powered itinerary generation",
+    images: [socialImage],
   },
   icons: {
     icon: "/icons/icon-192x192.png",
@@ -63,7 +79,7 @@ export default function RootLayout({
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen flex flex-col`}
+        className={`${geistSans.variable} antialiased min-h-screen flex flex-col`}
       >
         <ServiceWorkerRegistration />
         <a
@@ -72,7 +88,7 @@ export default function RootLayout({
         >
           Skip to content
         </a>
-        <Navbar />
+        <Navbar demoMode={isDemoMode()} authConfigured={isAuthConfigured()} />
         <div id="main-content" tabIndex={-1} className="flex-1 min-w-0 outline-none">
           {children}
         </div>

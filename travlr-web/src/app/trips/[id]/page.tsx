@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { ArrowLeft, ArrowRight, CalendarDays, Loader2, MapPin, RefreshCw } from "lucide-react"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
@@ -27,6 +28,7 @@ type TripDay = {
 
 type TripDetails = {
     id: string
+    isOwner: boolean
     name: string
     destination: string | null
     startDate: string | null
@@ -98,6 +100,7 @@ function normalizeTrip(value: unknown): TripDetails | null {
 
     return {
         id,
+        isOwner: record.isOwner === true,
         name: asString(record.name) ?? asString(record.tripName) ?? "Untitled trip",
         destination: asString(record.destination),
         startDate: asString(record.startDate),
@@ -156,7 +159,10 @@ export default function TripDetailsPage() {
         setAuthState(null)
 
         try {
-            const response = await fetch(`/api/trips/${encodeURIComponent(tripId)}`, { signal })
+            const response = await fetch(`/api/trips/${encodeURIComponent(tripId)}`, {
+                signal,
+                cache: "no-store",
+            })
             const payload: unknown = await response.json().catch(() => null)
             if (response.status === 401) {
                 const nextAuthState = classifyAuthFailure(payload)
@@ -249,7 +255,12 @@ export default function TripDetailsPage() {
                     </button>
                     <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
                         <div>
-                            <p className="text-sm font-medium text-primary">Your itinerary</p>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-medium text-primary">
+                                    {trip.isOwner ? "Your itinerary" : "Shared itinerary"}
+                                </p>
+                                {!trip.isOwner && <Badge variant="secondary">View only</Badge>}
+                            </div>
                             <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">{trip.name}</h1>
                             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted-foreground">
                                 <span className="inline-flex items-center gap-1.5">

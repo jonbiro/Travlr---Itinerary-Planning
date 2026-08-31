@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client"
+import { Prisma, type PrismaClient } from "@prisma/client"
 import { z } from "zod"
 import { PRODUCT_LIMITS } from "@/lib/product-limits"
 
@@ -60,10 +60,19 @@ export async function persistItineraryChange(
     change: ItineraryChange,
 ): Promise<PersistItineraryResult> {
     return prisma.$transaction(async (tx) => {
-        const trip = await tx.trip.findFirst({
-            where: { id: tripId, userId },
-            select: { id: true, startDate: true, endDate: true },
-        })
+        // Every itinerary mutation and trip-date edit locks this shared parent
+        // row. That serializes limit checks and prevents a new Day racing a
+        // date-range reconciliation in PATCH /api/trips/:id.
+        const [trip] = await tx.$queryRaw<{
+            id: string
+            startDate: Date | null
+            endDate: Date | null
+        }[]>(Prisma.sql`
+            SELECT "id", "startDate", "endDate"
+            FROM "Trip"
+            WHERE "id" = ${tripId} AND "userId" = ${userId}
+            FOR UPDATE
+        `)
 
         if (!trip) {
             return { status: "not-found", message: "That trip could not be found or is not editable." }
@@ -99,20 +108,6 @@ export async function persistItineraryChange(
             }
         }
 
-        if (!day) {
-            day = await tx.day.create({
-                data: {
-                    tripId: trip.id,
-                    dayNumber: change.day,
-                    date: dateForDay(trip.startDate, change.day),
-                    theme: "New Day",
-                },
-                include: {
-                    activities: true,
-                },
-            })
-        }
-
         if (change.action === "add") {
             const totalActivityCount = await tx.itineraryItem.count({
                 where: { day: { tripId: trip.id } },
@@ -124,11 +119,25 @@ export async function persistItineraryChange(
                 }
             }
 
-            if (day.activities.length >= PRODUCT_LIMITS.maxActivitiesPerDay) {
+            if (day && day.activities.length >= PRODUCT_LIMITS.maxActivitiesPerDay) {
                 return {
                     status: "limit-reached",
                     message: `Day ${change.day} already has the maximum of ${PRODUCT_LIMITS.maxActivitiesPerDay} activities.`,
                 }
+            }
+
+            if (!day) {
+                day = await tx.day.create({
+                    data: {
+                        tripId: trip.id,
+                        dayNumber: change.day,
+                        date: dateForDay(trip.startDate, change.day),
+                        theme: "New Day",
+                    },
+                    include: {
+                        activities: true,
+                    },
+                })
             }
 
             const nextOrder = day.activities.reduce(
@@ -147,6 +156,13 @@ export async function persistItineraryChange(
             return {
                 status: "updated",
                 message: `Added ${change.activity.name} to Day ${change.day}.`,
+            }
+        }
+
+        if (!day) {
+            return {
+                status: "day-not-found",
+                message: `Day ${change.day} does not have an itinerary to update.`,
             }
         }
 

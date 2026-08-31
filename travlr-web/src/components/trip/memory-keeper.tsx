@@ -30,6 +30,7 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
     Select,
     SelectContent,
@@ -37,7 +38,6 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { Memory, MemoryType } from "@/lib/types/memory"
 import { MEMORY_TYPES, getMemoryTypeInfo } from "@/lib/types/memory"
 
@@ -105,9 +105,11 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
     const [memories, setMemories] = useState<Memory[]>([])
     const [isLoading, setIsLoading] = useState(false)
     const [isAdding, setIsAdding] = useState(false)
+    const [deletingMemoryId, setDeletingMemoryId] = useState<string | null>(null)
     const [dialogOpen, setDialogOpen] = useState(false)
     const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null)
-    const [activeTab, setActiveTab] = useState<string>("all")
+    const [memoryToDelete, setMemoryToDelete] = useState<Memory | null>(null)
+    const [activeTab, setActiveTab] = useState<"all" | MemoryType>("all")
     const [formError, setFormError] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [authState, setAuthState] = useState<AuthState | null>(null)
@@ -246,10 +248,13 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
         }
     }
 
-    async function handleDeleteMemory(memoryId: string) {
+    async function handleDeleteMemory(memory: Memory) {
+        if (!memory.canDelete) return
+
+        setDeletingMemoryId(memory.id)
         setError(null)
         try {
-            const res = await fetch(`/api/trip/memories?id=${memoryId}`, {
+            const res = await fetch(`/api/trip/memories?id=${encodeURIComponent(memory.id)}`, {
                 method: "DELETE",
             })
 
@@ -267,10 +272,13 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                     : "Unable to delete memory"
                 throw new Error(message)
             }
-            setMemories((previousMemories) => previousMemories.filter((memory) => memory.id !== memoryId))
+            setMemories((previousMemories) => previousMemories.filter((currentMemory) => currentMemory.id !== memory.id))
             setSelectedMemory(null)
         } catch (deleteError) {
             setError(deleteError instanceof Error ? deleteError.message : "Unable to delete memory")
+        } finally {
+            setDeletingMemoryId(null)
+            setMemoryToDelete(null)
         }
     }
 
@@ -451,29 +459,36 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                 </Dialog>
             </div>
 
-            {/* Filter Tabs */}
+            {/* Memory filters */}
             <div className="px-4 pt-2">
-                <Tabs value={activeTab} onValueChange={setActiveTab}>
-                    <TabsList className="grid w-full grid-cols-5 h-8">
-                        <TabsTrigger value="all" className="text-xs">All</TabsTrigger>
-                        <TabsTrigger value="photo" className="text-xs" aria-label="Photos">
-                            <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
-                            <span className="sr-only">Photos</span>
-                        </TabsTrigger>
-                        <TabsTrigger value="video" className="text-xs" aria-label="Videos">
-                            <Video className="h-3.5 w-3.5" aria-hidden="true" />
-                            <span className="sr-only">Videos</span>
-                        </TabsTrigger>
-                        <TabsTrigger value="note" className="text-xs" aria-label="Notes">
-                            <FileText className="h-3.5 w-3.5" aria-hidden="true" />
-                            <span className="sr-only">Notes</span>
-                        </TabsTrigger>
-                        <TabsTrigger value="document" className="text-xs" aria-label="Documents">
-                            <FileText className="h-3.5 w-3.5" aria-hidden="true" />
-                            <span className="sr-only">Documents</span>
-                        </TabsTrigger>
-                    </TabsList>
-                </Tabs>
+                <div className="grid h-9 w-full grid-cols-5 rounded-lg bg-muted p-1" role="group" aria-label="Filter memories">
+                    {([
+                        { value: "all", label: "All", icon: null },
+                        { value: "photo", label: "Photos", icon: ImageIcon },
+                        { value: "video", label: "Videos", icon: Video },
+                        { value: "note", label: "Notes", icon: FileText },
+                        { value: "document", label: "Documents", icon: FileText },
+                    ] as const).map((filter) => {
+                        const Icon = filter.icon
+                        const selected = activeTab === filter.value
+
+                        return (
+                            <button
+                                key={filter.value}
+                                type="button"
+                                aria-label={filter.label}
+                                aria-pressed={selected}
+                                onClick={() => setActiveTab(filter.value)}
+                                className="inline-flex items-center justify-center rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm"
+                            >
+                                {Icon ? <Icon className="h-3.5 w-3.5" aria-hidden="true" /> : filter.label}
+                            </button>
+                        )
+                    })}
+                </div>
+                <p className="sr-only" role="status" aria-live="polite">
+                    {filteredMemories.length} {filteredMemories.length === 1 ? "memory" : "memories"} shown.
+                </p>
             </div>
 
             {/* Memory Grid */}
@@ -503,7 +518,13 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                                 >
                                     {memory.type === "photo" && isSafeExternalUrl(memory.fileUrl) ? (
                                         // eslint-disable-next-line @next/next/no-img-element
-                                        <img src={memory.fileUrl} alt={memory.title} className="aspect-square w-full object-cover" />
+                                        <img
+                                            src={memory.fileUrl}
+                                            alt={memory.title}
+                                            loading="lazy"
+                                            decoding="async"
+                                            className="aspect-square w-full object-cover"
+                                        />
                                     ) : (
                                         <div className="aspect-square bg-muted flex items-center justify-center">
                                             <MemoryTypeIcon type={memory.type as MemoryType} className="h-8 w-8 text-muted-foreground" />
@@ -534,6 +555,9 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                                     <span className="sr-only">{getMemoryTypeInfo(selectedMemory.type as MemoryType).label}</span>
                                     {selectedMemory.title}
                                 </DialogTitle>
+                                <DialogDescription className="sr-only">
+                                    Details for {selectedMemory.title}
+                                </DialogDescription>
                             </DialogHeader>
                             <div className="space-y-4">
                                 {selectedMemory.type === "photo" && isSafeExternalUrl(selectedMemory.fileUrl) && (
@@ -541,6 +565,8 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                                     <img
                                         src={selectedMemory.fileUrl}
                                         alt={selectedMemory.title}
+                                        loading="lazy"
+                                        decoding="async"
                                         className="aspect-video w-full rounded-lg object-cover"
                                     />
                                 )}
@@ -586,23 +612,46 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                                     )}
                                 </div>
 
-                                <div className="flex justify-end">
-                                    <Button
-                                        type="button"
-                                        variant="destructive"
-                                        size="sm"
-                                        onClick={() => handleDeleteMemory(selectedMemory.id)}
-                                        aria-label={`Delete memory: ${selectedMemory.title}`}
-                                    >
-                                        <Trash2 className="h-4 w-4 mr-1" aria-hidden="true" />
-                                        Delete
-                                    </Button>
-                                </div>
+                                {selectedMemory.canDelete && (
+                                    <div className="flex justify-end">
+                                        <Button
+                                            type="button"
+                                            variant="destructive"
+                                            size="sm"
+                                            onClick={() => setMemoryToDelete(selectedMemory)}
+                                            disabled={deletingMemoryId !== null}
+                                            aria-label={`Delete memory: ${selectedMemory.title}`}
+                                        >
+                                            {deletingMemoryId === selectedMemory.id ? (
+                                                <Loader2 className="h-4 w-4 mr-1 animate-spin" aria-hidden="true" />
+                                            ) : (
+                                                <Trash2 className="h-4 w-4 mr-1" aria-hidden="true" />
+                                            )}
+                                            Delete
+                                        </Button>
+                                    </div>
+                                )}
                             </div>
                         </>
                     )}
                 </DialogContent>
             </Dialog>
+            <ConfirmDialog
+                open={memoryToDelete !== null}
+                onOpenChange={(open) => {
+                    if (!open) setMemoryToDelete(null)
+                }}
+                title="Delete memory?"
+                description={memoryToDelete
+                    ? `Delete ${memoryToDelete.title} permanently? This cannot be undone.`
+                    : "This memory will be permanently deleted."}
+                confirmLabel="Delete memory"
+                cancelLabel="Keep memory"
+                isConfirming={deletingMemoryId !== null}
+                onConfirm={() => {
+                    if (memoryToDelete) return handleDeleteMemory(memoryToDelete)
+                }}
+            />
         </div>
     )
 }

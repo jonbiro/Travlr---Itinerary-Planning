@@ -4,6 +4,9 @@ The actively developed web app is the Next.js project in [`travlr-web`](travlr-w
 
 The Rails application at the repository root is an archived implementation retained for reference. It is not part of the current release or CI pipeline and still pins end-of-life Ruby/Rails dependencies, so do not deploy it as a production service without a dedicated framework upgrade and security review.
 
+Repository-level `npm` scripts and process files intentionally delegate to `travlr-web`, so hosts that start from the repository root build and run the supported Next.js app instead of the archive. Vercel projects should still use `travlr-web` as their project root for native framework detection.
+The root build explicitly installs the nested app's build tooling; the Prisma migration CLI remains available to the release process after production dependency pruning.
+
 Legacy Rails credential files are intentionally not stored in Git. If you revive that application, create a new encrypted credentials file locally and supply its newly generated `RAILS_MASTER_KEY` through the deployment environment; never reuse the key that appeared in this repository's history.
 
 > **Security notice:** deleted credentials remain recoverable from Git history.

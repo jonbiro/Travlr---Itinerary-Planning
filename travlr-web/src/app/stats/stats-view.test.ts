@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { deriveTravelStats, normalizeTrips } from "./stats-view"
+import { deriveTravelStats, normalizeTravelStats, normalizeTrips } from "./stats-view"
 
 describe("travel stats data", () => {
     it("derives metrics from trip itineraries", () => {
@@ -55,5 +55,25 @@ describe("travel stats data", () => {
             },
         ])
         expect(deriveTravelStats(trips).totalTrips).toBe(1)
+    })
+
+    it("normalizes the lightweight aggregate response without requiring trip graphs", () => {
+        expect(normalizeTravelStats({
+            totalTrips: 3,
+            totalDestinations: 2,
+            totalDaysPlanned: 8,
+            totalActivities: 14,
+            topDestinations: [{ name: "Paris, France", tripCount: 2 }],
+        })).toEqual({
+            totalTrips: 3,
+            totalDestinations: 2,
+            totalDaysPlanned: 8,
+            totalActivities: 14,
+            topDestinations: [{ name: "Paris, France", tripCount: 2 }],
+        })
+    })
+
+    it("rejects an incomplete aggregate response", () => {
+        expect(() => normalizeTravelStats({ totalTrips: 1 })).toThrow("unexpected stats response")
     })
 })

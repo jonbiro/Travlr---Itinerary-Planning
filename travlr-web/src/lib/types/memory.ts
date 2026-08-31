@@ -12,6 +12,7 @@ export interface Memory {
     date: Date | string
     location?: string | null
     createdAt: Date | string
+    canDelete: boolean
 }
 
 export type MemoryType = 'photo' | 'video' | 'note' | 'document'

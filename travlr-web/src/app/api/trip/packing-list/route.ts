@@ -52,6 +52,7 @@ export async function POST(req: Request) {
 
         const result = await generateText({
             model: openai(process.env.OPENAI_MODEL || "gpt-5.6-luna"),
+            abortSignal: req.signal,
             output: Output.object({ schema: packingListSchema }),
             maxOutputTokens: 2_000,
             system: "You are a pragmatic travel assistant. Generate a packing list based only on the supplied destination, duration, and planned activities. Do not claim to know the forecast.",

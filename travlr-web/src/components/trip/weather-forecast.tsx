@@ -161,8 +161,8 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
 
     if (isLoading) {
         return (
-            <div className="flex flex-col items-center justify-center p-8 h-full">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            <div className="flex h-full flex-col items-center justify-center p-8" role="status" aria-live="polite">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" aria-hidden="true" />
                 <p className="mt-2 text-sm text-muted-foreground">Loading weather...</p>
             </div>
         )
@@ -214,9 +214,9 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
     return (
         <div className="flex flex-col h-full p-4 space-y-4">
             {/* Current Weather */}
-            <Card className="bg-gradient-to-br from-sky-500 to-blue-600 text-white border-0">
+            <Card className="border-0 bg-gradient-to-br from-sky-800 via-blue-700 to-blue-800 text-white">
                 <CardHeader className="pb-2">
-                    <CardDescription className="text-white/80">Current conditions · {forecast.location}</CardDescription>
+                    <CardDescription className="text-white">Current conditions · {forecast.location}</CardDescription>
                     <CardTitle className="text-4xl font-bold">
                         <span className="sr-only">Current temperature: </span>
                         {forecast.current.temp}°C
@@ -230,12 +230,18 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
                         </div>
                         <div className="flex gap-4 text-sm">
                             <div className="flex items-center gap-1">
-                                <Droplets className="h-4 w-4" />
-                                {forecast.current.humidity}%
+                                <Droplets className="h-4 w-4" aria-hidden="true" />
+                                <span>
+                                    <span className="sr-only">Humidity: </span>
+                                    {forecast.current.humidity}%
+                                </span>
                             </div>
                             <div className="flex items-center gap-1">
-                                <Wind className="h-4 w-4" />
-                                {forecast.current.windSpeed} km/h
+                                <Wind className="h-4 w-4" aria-hidden="true" />
+                                <span>
+                                    <span className="sr-only">Wind speed: </span>
+                                    {forecast.current.windSpeed} km/h
+                                </span>
                             </div>
                         </div>
                     </div>
@@ -245,8 +251,15 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
             {/* 10-Day Forecast */}
             <div>
                 <h3 className="mb-3 font-semibold">10-day forecast</h3>
-                <ScrollArea className="w-full whitespace-nowrap">
-                    <div className="flex gap-3 pb-4">
+                <ScrollArea
+                    className="w-full whitespace-nowrap"
+                    viewportProps={{
+                        role: "region",
+                        tabIndex: 0,
+                        "aria-label": "10-day weather forecast. Use horizontal scrolling to view all days.",
+                    }}
+                >
+                    <ul className="flex gap-3 pb-4">
                         {forecast.daily.map((day, index) => {
                             const { day: dayName, date } = formatWeatherDate(
                                 day.date,
@@ -254,39 +267,57 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
                                 forecast.timezoneOffset,
                             )
                             return (
-                                <Card
+                                <li
                                     key={index}
-                                    className={cn(
-                                        "min-w-[100px] text-center hover:bg-muted/50 transition-colors",
-                                        index === 0 && "border-primary"
-                                    )}
+                                    className="min-w-[100px]"
                                 >
-                                    <CardContent className="p-3">
-                                        <p className="text-xs text-muted-foreground">{index === 0 ? 'Today' : dayName}</p>
-                                        <p className="text-xs text-muted-foreground">{date}</p>
-                                        <WeatherIcon
-                                            condition={day.condition}
-                                            className={cn(
-                                                "h-6 w-6 mx-auto my-2",
-                                                day.condition === 'sunny' && "text-yellow-500",
-                                                day.condition === 'rainy' && "text-blue-500",
-                                                day.condition === 'stormy' && "text-purple-500",
-                                                day.condition === 'snowy' && "text-cyan-400"
-                                            )}
-                                        />
-                                        <p className="font-semibold">{day.tempHigh}°</p>
-                                        <p className="text-sm text-muted-foreground">{day.tempLow}°</p>
-                                        {day.precipitation > 20 && (
-                                            <div className="flex items-center justify-center gap-1 text-xs text-blue-500 mt-1">
-                                                <Droplets className="h-3 w-3" />
-                                                {day.precipitation}%
-                                            </div>
+                                    <Card
+                                        className={cn(
+                                            "text-center transition-colors hover:bg-muted/50",
+                                            index === 0 && "border-primary"
                                         )}
-                                    </CardContent>
-                                </Card>
+                                    >
+                                        <CardContent className="p-3">
+                                            <p className="text-xs text-muted-foreground">
+                                                <span className="sr-only">Day: </span>
+                                                {index === 0 ? 'Today' : dayName}
+                                            </p>
+                                            <p className="text-xs text-muted-foreground">
+                                                <span className="sr-only">Date: </span>
+                                                {date}
+                                            </p>
+                                            <WeatherIcon
+                                                condition={day.condition}
+                                                className={cn(
+                                                    "mx-auto my-2 h-6 w-6",
+                                                    day.condition === 'sunny' && "text-yellow-500",
+                                                    day.condition === 'rainy' && "text-blue-500",
+                                                    day.condition === 'stormy' && "text-purple-500",
+                                                    day.condition === 'snowy' && "text-cyan-400"
+                                                )}
+                                            />
+                                            <p className="sr-only">Condition: {day.condition.replace('-', ' ')}</p>
+                                            <p className="font-semibold">
+                                                <span className="sr-only">High: </span>
+                                                {day.tempHigh}°
+                                            </p>
+                                            <p className="text-sm text-muted-foreground">
+                                                <span className="sr-only">Low: </span>
+                                                {day.tempLow}°
+                                            </p>
+                                            <div className="mt-1 flex items-center justify-center gap-1 text-xs text-blue-500">
+                                                <Droplets className="h-3 w-3" aria-hidden="true" />
+                                                <span>
+                                                    <span className="sr-only">Chance of precipitation: </span>
+                                                    {day.precipitation}%
+                                                </span>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                </li>
                             )
                         })}
-                    </div>
+                    </ul>
                     <ScrollBar orientation="horizontal" />
                 </ScrollArea>
             </div>

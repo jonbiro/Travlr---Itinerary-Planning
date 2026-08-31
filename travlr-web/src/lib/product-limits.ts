@@ -11,6 +11,9 @@ export const PRODUCT_LIMITS = {
     maxActivitiesPerTrip: 500,
     maxMemoriesPerTrip: 500,
     maxExpensesPerTrip: 1_000,
+    // A trip owner can share with up to this many additional accounts. The
+    // owner is not counted as a TripUser member.
+    maxMembersPerTrip: 25,
     maxTripList: 100,
     maxCollectionPage: 100,
     defaultCollectionPage: 100,

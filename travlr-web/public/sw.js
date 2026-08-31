@@ -1,4 +1,4 @@
-const CACHE_NAME = "travlr-v5";
+const CACHE_NAME = "travlr-v6";
 
 // Keep this list deliberately small. It contains only public shell assets;
 // authenticated route HTML and API responses must never enter the cache.
@@ -46,7 +46,8 @@ self.addEventListener("install", (event) => {
             STATIC_ASSETS.map((asset) => cache.add(asset).catch(() => undefined)),
         )),
     );
-    self.skipWaiting();
+    // Keep updated workers waiting until the user accepts the refresh prompt.
+    // The first install activates automatically because there is no controller.
 });
 
 self.addEventListener("activate", (event) => {
