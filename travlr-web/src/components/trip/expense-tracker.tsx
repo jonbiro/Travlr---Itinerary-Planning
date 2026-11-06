@@ -98,6 +98,10 @@ function classifyAuthFailure(payload: unknown): AuthState {
 }
 
 export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: ExpenseTrackerProps) {
+    return <ExpenseTrackerForTrip key={tripId ?? ""} tripId={tripId} budget={budget} currency={currency} />
+}
+
+function ExpenseTrackerForTrip({ tripId, budget = 0, currency = "USD" }: ExpenseTrackerProps) {
     const [expenses, setExpenses] = useState<Expense[]>([])
     const [isLoading, setIsLoading] = useState(false)
     const [isAddingExpense, setIsAddingExpense] = useState(false)
@@ -116,13 +120,7 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
 
     // Load expenses
     useEffect(() => {
-        if (!tripId) {
-            setExpenses([])
-            setIsLoading(false)
-            setError(null)
-            setAuthState(null)
-            return
-        }
+        if (!tripId) return
 
         const requestedTripId = tripId
         const controller = new AbortController()
@@ -136,6 +134,7 @@ export function ExpenseTracker({ tripId, budget = 0, currency = "USD" }: Expense
                     signal: controller.signal,
                 })
                 const data: unknown = await res.json().catch(() => null)
+                if (controller.signal.aborted) return
                 if (res.status === 401) {
                     const nextAuthState = classifyAuthFailure(data)
                     setAuthState(nextAuthState)

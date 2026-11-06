@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ExpenseTracker } from "./expense-tracker"
@@ -77,5 +77,30 @@ describe("ExpenseTracker deletion permissions", () => {
             { method: "DELETE" },
         ))
         await waitFor(() => expect(screen.queryByText("Dinner")).not.toBeInTheDocument())
+    })
+})
+
+describe("ExpenseTracker trip changes", () => {
+    it("clears the previous trip immediately and ignores its late response", async () => {
+        let resolveOld!: (value: ReturnType<typeof response>) => void
+        fetchMock.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
+        fetchMock.mockResolvedValueOnce(response({ expenses: [{ ...ownerExpense, id: "new", tripId: "trip-2", description: "New trip" }] }))
+
+        const { rerender } = render(<ExpenseTracker tripId="trip-1" />)
+        const oldSignal = (fetchMock.mock.calls[0][1] as { signal: AbortSignal }).signal
+        rerender(<ExpenseTracker tripId="trip-2" />)
+        expect(oldSignal.aborted).toBe(true)
+        await screen.findByText("New trip")
+        await act(async () => { resolveOld(response({ expenses: [ownerExpense] })) })
+        expect(screen.queryByText("Dinner")).not.toBeInTheDocument()
+        expect(screen.getByText("New trip")).toBeInTheDocument()
+    })
+
+    it("does not show saved expenses after the trip is cleared", async () => {
+        fetchMock.mockResolvedValueOnce(response({ expenses: [ownerExpense] }))
+        const { rerender } = render(<ExpenseTracker tripId="trip-1" />)
+        await screen.findByText("Dinner")
+        rerender(<ExpenseTracker />)
+        expect(screen.queryByText("Dinner")).not.toBeInTheDocument()
     })
 })
