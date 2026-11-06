@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import DashboardPage from "./page"
 
 vi.mock("next/dynamic", () => ({ default: () => () => null }))
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.unstubAllGlobals(); window.history.replaceState({}, "", "/") })
 
 describe("dashboard request isolation", () => {
     it("does not show a late authorization error from an aborted request", async () => {
@@ -32,5 +32,36 @@ describe("dashboard request isolation", () => {
         expect(screen.getByText("Loading trips")).toBeInTheDocument()
         await act(async () => { resolveRetry({ ok: true, status: 200, json: async () => [] }) })
         expect(screen.getByText("Create your first trip")).toBeInTheDocument()
+    })
+
+    it("opens the requested saved trip and does not default to the first one", async () => {
+        window.history.replaceState({}, "", "/dashboard?tripId=two")
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => [
+            { id: "one", name: "First", destination: "Paris", days: [] },
+            { id: "two", name: "Second", destination: "Tokyo", days: [] },
+        ] }))
+        render(<DashboardPage />)
+        expect(await screen.findByText("Tokyo • 0 days")).toBeInTheDocument()
+        expect(screen.queryByText("Paris • 0 days")).not.toBeInTheDocument()
+    })
+
+    it("removes an unavailable requested trip and falls back to an available trip", async () => {
+        window.history.replaceState({}, "", "/dashboard?tripId=missing")
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => [
+            { id: "one", name: "First", destination: "Paris", days: [] },
+        ] }))
+        render(<DashboardPage />)
+        await screen.findByText("Paris • 0 days")
+        expect(new URL(window.location.href).searchParams.has("tripId")).toBe(false)
+    })
+
+    it("opens the create dialog from a query and clears the query when closed", async () => {
+        window.history.replaceState({}, "", "/dashboard?create=true&destination=Paris&interests=art")
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => [] }))
+        render(<DashboardPage />)
+        await screen.findByRole("dialog", { name: "Create a new trip" })
+        fireEvent.keyDown(document, { key: "Escape" })
+        expect(screen.queryByRole("dialog", { name: "Create a new trip" })).not.toBeInTheDocument()
+        expect(window.location.search).toBe("")
     })
 })

@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic"
 import Link from "next/link"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Loader2, LockKeyhole, MapPin, Plus, RefreshCw, Settings2 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -220,13 +220,31 @@ function DashboardErrorState({ error, onRetry }: { error: DashboardError; onRetr
     )
 }
 
+const subscribeHydration = () => () => {}
+const clientSnapshot = () => true
+const serverSnapshot = () => false
+
 export default function DashboardPage() {
+    const hydrated = useSyncExternalStore(subscribeHydration, clientSnapshot, serverSnapshot)
+    return hydrated ? <DashboardContent /> : null
+}
+
+function DashboardContent() {
+    const [initialQuery] = useState(() => {
+        const params = new URLSearchParams(window.location.search)
+        return {
+            tripId: params.get("tripId")?.trim() || null,
+            destination: params.get("destination")?.trim() || "",
+            interests: params.get("interests")?.split(",").map((interest) => interest.trim().toLowerCase()).filter(Boolean) ?? [],
+            create: ["1", "true"].includes(params.get("create")?.toLowerCase() || ""),
+        }
+    })
     const [trips, setTrips] = useState<Trip[]>([])
     const [selectedTripId, setSelectedTripId] = useState<string | null>(null)
-    const [requestedTripId, setRequestedTripId] = useState<string | null>(null)
-    const [initialDestination, setInitialDestination] = useState("")
-    const [initialInterests, setInitialInterests] = useState<string[]>([])
-    const [isCreateOpen, setIsCreateOpen] = useState(false)
+    const requestedTripId = useRef(initialQuery.tripId)
+    const [initialDestination, setInitialDestination] = useState(initialQuery.destination)
+    const [initialInterests, setInitialInterests] = useState(initialQuery.interests)
+    const [isCreateOpen, setIsCreateOpen] = useState(initialQuery.create)
     const [isLoading, setIsLoading] = useState(true)
     const [loadError, setLoadError] = useState<DashboardError | null>(null)
     const requestRef = useRef<AbortController | null>(null)
@@ -277,7 +295,20 @@ export default function DashboardPage() {
                     throw new Error("We couldn’t read your saved trips right now.")
                 }
 
-                if (!controller.signal.aborted) setTrips(mappedTrips)
+                if (controller.signal.aborted) return
+                setTrips(mappedTrips)
+                const requested = requestedTripId.current
+                requestedTripId.current = null
+                if (requested && !mappedTrips.some((currentTrip) => currentTrip.id === requested)) {
+                    const url = new URL(window.location.href)
+                    url.searchParams.delete("tripId")
+                    window.history.replaceState({}, "", url)
+                    toast.error("That trip isn’t available. Choose another trip from your list.")
+                }
+                setSelectedTripId((current) => {
+                    const preferred = requested && mappedTrips.some((item) => item.id === requested) ? requested : current
+                    return preferred && mappedTrips.some((item) => item.id === preferred) ? preferred : mappedTrips[0]?.id ?? null
+                })
             }).catch((error: unknown) => {
                 if (controller.signal.aborted) return
 
@@ -300,55 +331,9 @@ export default function DashboardPage() {
     }
 
     useEffect(() => {
-        const params = new URLSearchParams(window.location.search)
-        const tripId = params.get("tripId")?.trim()
-        const destination = params.get("destination")?.trim()
-        const interests = params.get("interests")
-            ?.split(",")
-            .map((interest) => interest.trim().toLowerCase())
-            .filter(Boolean) ?? []
-        const shouldCreate = ["1", "true"].includes(params.get("create")?.toLowerCase() || "")
-
-        setRequestedTripId(tripId || null)
-        setInitialDestination(destination || "")
-        setInitialInterests(interests)
-        if (shouldCreate) setIsCreateOpen(true)
-    }, [])
-
-    useEffect(() => {
         void fetchTrips()
         return () => requestRef.current?.abort()
     }, [fetchTrips])
-
-    useEffect(() => {
-        if (isLoading || loadError) return
-
-        if (requestedTripId) {
-            if (trips.some((currentTrip) => currentTrip.id === requestedTripId)) {
-                setSelectedTripId(requestedTripId)
-            } else {
-                setSelectedTripId(null)
-                const url = new URL(window.location.href)
-                url.searchParams.delete("tripId")
-                window.history.replaceState({}, "", url)
-                toast.error("That trip isn’t available. Choose another trip from your list.")
-            }
-            setRequestedTripId(null)
-            return
-        }
-
-        if (trips.length === 0) {
-            setSelectedTripId(null)
-            return
-        }
-
-        setSelectedTripId((currentSelection) => {
-            if (currentSelection && trips.some((currentTrip) => currentTrip.id === currentSelection)) {
-                return currentSelection
-            }
-            return trips[0].id
-        })
-    }, [isLoading, loadError, requestedTripId, trips])
 
     const clearCreateQuery = useCallback(() => {
         const url = new URL(window.location.href)
@@ -375,7 +360,7 @@ export default function DashboardPage() {
         }
 
         setSelectedTripId(newTrip.id)
-        setRequestedTripId(null)
+        requestedTripId.current = null
         const url = new URL(window.location.href)
         url.searchParams.delete("tripId")
         window.history.replaceState({}, "", url)
