@@ -102,6 +102,10 @@ function isSafeExternalUrl(value: string | null | undefined): value is string {
 }
 
 export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
+    return <MemoryKeeperForTrip key={tripId ?? ""} tripId={tripId} />
+}
+
+function MemoryKeeperForTrip({ tripId }: MemoryKeeperProps) {
     const [memories, setMemories] = useState<Memory[]>([])
     const [isLoading, setIsLoading] = useState(false)
     const [isAdding, setIsAdding] = useState(false)
@@ -126,13 +130,7 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
 
     // Load memories
     useEffect(() => {
-        if (!tripId) {
-            setMemories([])
-            setIsLoading(false)
-            setError(null)
-            setAuthState(null)
-            return
-        }
+        if (!tripId) return
 
         const requestedTripId = tripId
         const controller = new AbortController()
@@ -146,6 +144,7 @@ export function MemoryKeeper({ tripId }: MemoryKeeperProps) {
                     signal: controller.signal,
                 })
                 const data: unknown = await res.json().catch(() => null)
+                if (controller.signal.aborted) return
                 if (res.status === 401) {
                     const nextAuthState = classifyAuthFailure(data)
                     setAuthState(nextAuthState)

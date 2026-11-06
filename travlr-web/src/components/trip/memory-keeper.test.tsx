@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { MemoryKeeper } from "./memory-keeper"
@@ -36,6 +36,30 @@ const memberMemory = {
 beforeEach(() => {
     fetchMock.mockReset()
     vi.stubGlobal("fetch", fetchMock)
+})
+
+describe("MemoryKeeper trip changes", () => {
+    it("aborts the old request and ignores a late result", async () => {
+        let resolveOld!: (value: ReturnType<typeof response>) => void
+        fetchMock.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
+        fetchMock.mockResolvedValueOnce(response({ memories: [{ ...ownerMemory, id: "new", tripId: "trip-2", title: "New trip note" }] }))
+        const { rerender } = render(<MemoryKeeper tripId="trip-1" />)
+        const oldSignal = (fetchMock.mock.calls[0][1] as { signal: AbortSignal }).signal
+        rerender(<MemoryKeeper tripId="trip-2" />)
+        expect(oldSignal.aborted).toBe(true)
+        await screen.findByRole("button", { name: "View memory: New trip note" })
+        await act(async () => { resolveOld(response({ memories: [ownerMemory] })) })
+        expect(screen.queryByRole("button", { name: "View memory: Sunset note" })).not.toBeInTheDocument()
+        expect(screen.getByRole("button", { name: "View memory: New trip note" })).toBeInTheDocument()
+    })
+
+    it("clears the previous trip when no trip is selected", async () => {
+        fetchMock.mockResolvedValueOnce(response({ memories: [ownerMemory] }))
+        const { rerender } = render(<MemoryKeeper tripId="trip-1" />)
+        await screen.findByRole("button", { name: "View memory: Sunset note" })
+        rerender(<MemoryKeeper />)
+        expect(screen.queryByRole("button", { name: "View memory: Sunset note" })).not.toBeInTheDocument()
+    })
 })
 
 afterEach(() => {
