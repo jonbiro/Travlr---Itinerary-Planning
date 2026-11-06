@@ -77,54 +77,48 @@ function ShareTripDialogForTrip({ tripId, open, setOpen }: { tripId?: string; op
     const [members, setMembers] = useState<TripMember[]>([])
     const [maxMembers, setMaxMembers] = useState(25)
     const [membersError, setMembersError] = useState<string | null>(null)
-    const [isMembersLoading, setIsMembersLoading] = useState(false)
+    const [isMembersLoading, setIsMembersLoading] = useState(open && Boolean(tripId))
     const [memberToRemove, setMemberToRemove] = useState<TripMember | null>(null)
     const [isRemoving, setIsRemoving] = useState(false)
     const memberRequestRef = useRef<AbortController | null>(null)
     const shareUrl = tripId ? `${typeof window !== 'undefined' ? window.location.origin : ''}/trips/${encodeURIComponent(tripId)}` : "Select a trip first"
 
-    const loadMembers = useCallback(async () => {
-        if (!tripId) return
+    const loadMembers = useCallback(() => {
+        if (!tripId) return Promise.resolve()
 
         memberRequestRef.current?.abort()
         const controller = new AbortController()
         memberRequestRef.current = controller
-        setIsMembersLoading(true)
-        setMembersError(null)
+        return fetch(`/api/trip/share?tripId=${encodeURIComponent(tripId)}`, { cache: "no-store", signal: controller.signal })
+            .then(async (response) => {
+                const { payload, text } = await readPayload(response)
+                if (controller.signal.aborted) return
 
-        try {
-            const response = await fetch(`/api/trip/share?tripId=${encodeURIComponent(tripId)}`, {
-                cache: "no-store",
-                signal: controller.signal,
-            })
-            const { payload, text } = await readPayload(response)
-            if (controller.signal.aborted) return
-
-            if (!response.ok) {
-                if (response.status === 401) setAuthState(classifyAuthFailure(payload))
-                throw new Error(payloadMessage(payload, text || "Could not load collaborators."))
-            }
-
-            const record = isRecord(payload) ? payload : null
-            const nextMembers = Array.isArray(record?.members)
-                ? record.members.map(normalizeMember).filter((member): member is TripMember => member !== null)
-                : []
-
-            if (!controller.signal.aborted) {
-                setMembers(nextMembers)
-                if (typeof record?.maxMembersPerTrip === "number") {
-                    setMaxMembers(record.maxMembersPerTrip)
+                if (!response.ok) {
+                    if (response.status === 401) setAuthState(classifyAuthFailure(payload))
+                    throw new Error(payloadMessage(payload, text || "Could not load collaborators."))
                 }
-            }
-        } catch (error) {
-            if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) return
-            setMembersError(error instanceof Error ? error.message : "Could not load collaborators.")
-        } finally {
-            if (memberRequestRef.current === controller) {
-                memberRequestRef.current = null
-                setIsMembersLoading(false)
-            }
-        }
+
+                const record = isRecord(payload) ? payload : null
+                const nextMembers = Array.isArray(record?.members)
+                    ? record.members.map(normalizeMember).filter((member): member is TripMember => member !== null)
+                    : []
+
+                if (!controller.signal.aborted) {
+                    setMembers(nextMembers)
+                    if (typeof record?.maxMembersPerTrip === "number") {
+                        setMaxMembers(record.maxMembersPerTrip)
+                    }
+                }
+            }).catch((error: unknown) => {
+                if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) return
+                setMembersError(error instanceof Error ? error.message : "Could not load collaborators.")
+            }).finally(() => {
+                if (memberRequestRef.current === controller) {
+                    memberRequestRef.current = null
+                    setIsMembersLoading(false)
+                }
+            })
     }, [tripId])
 
     useEffect(() => {
@@ -134,7 +128,11 @@ function ShareTripDialogForTrip({ tripId, open, setOpen }: { tripId?: string; op
 
     const handleOpenChange = (nextOpen: boolean) => {
         setOpen(nextOpen)
-        if (nextOpen) setStatusMessage("")
+        if (nextOpen) {
+            setStatusMessage("")
+            setMembersError(null)
+            setIsMembersLoading(Boolean(tripId))
+        }
     }
 
     const onInvite = async () => {
@@ -176,6 +174,8 @@ function ShareTripDialogForTrip({ tripId, open, setOpen }: { tripId?: string; op
             toast.success("Share request accepted")
             setStatusMessage("Share request accepted.")
             setEmail("")
+            setMembersError(null)
+            setIsMembersLoading(true)
             await loadMembers()
         } catch (error) {
             const message = error instanceof Error ? error.message : "Something went wrong"
@@ -321,7 +321,7 @@ function ShareTripDialogForTrip({ tripId, open, setOpen }: { tripId?: string; op
                             ) : membersError ? (
                                 <div className="space-y-2 p-2 text-sm" role="alert">
                                     <p className="text-destructive">{membersError}</p>
-                                    <Button type="button" variant="outline" size="sm" onClick={() => void loadMembers()}>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => { setMembersError(null); setIsMembersLoading(true); void loadMembers() }}>
                                         Try again
                                     </Button>
                                 </div>

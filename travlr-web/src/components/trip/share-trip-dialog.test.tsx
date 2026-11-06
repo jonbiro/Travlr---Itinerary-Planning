@@ -32,6 +32,20 @@ afterEach(() => {
 })
 
 describe("ShareTripDialog", () => {
+    it("shows loading and refreshes collaborators when reopened", async () => {
+        fetchMock.mockResolvedValueOnce(response({ members: [existingMember] }))
+        let resolveRefresh!: (value: ReturnType<typeof response>) => void
+        fetchMock.mockImplementationOnce(() => new Promise((resolve) => { resolveRefresh = resolve }))
+        render(<ShareTripDialog tripId={tripId} />)
+        fireEvent.click(screen.getByRole("button", { name: "Share" }))
+        await screen.findByText("Ada Lovelace")
+        fireEvent.keyDown(document, { key: "Escape" })
+        await waitFor(() => expect(screen.queryByText("Ada Lovelace")).not.toBeInTheDocument())
+        fireEvent.click(screen.getByRole("button", { name: "Share" }))
+        expect(screen.getByText("Loading collaborators…")).toBeInTheDocument()
+        await act(async () => { resolveRefresh(response({ members: [] })) })
+        expect(screen.queryByText("Ada Lovelace")).not.toBeInTheDocument()
+    })
     it("keeps the dialog open for the new trip and ignores the old response", async () => {
         let resolveOld!: (value: ReturnType<typeof response>) => void
         fetchMock.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
