@@ -1,6 +1,30 @@
-import { describe, expect, it } from 'vitest'
+import { act, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { formatWeatherDate } from './weather-forecast'
+import { formatWeatherDate, WeatherForecastComponent } from './weather-forecast'
+
+afterEach(() => vi.unstubAllGlobals())
+
+describe('weather destination changes', () => {
+    it('aborts the previous request and ignores its late authorization error', async () => {
+        let resolveOld!: (value: { ok: boolean; status: number; json: () => Promise<unknown> }) => void
+        const fetchMock = vi.fn()
+            .mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
+            .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ error: 'New destination unavailable' }) })
+        vi.stubGlobal('fetch', fetchMock)
+        const { rerender } = render(<WeatherForecastComponent destination="Paris" />)
+        const oldSignal = (fetchMock.mock.calls[0][1] as { signal: AbortSignal }).signal
+        rerender(<WeatherForecastComponent destination="Tokyo" />)
+        expect(oldSignal.aborted).toBe(true)
+        await screen.findByText('New destination unavailable')
+        await act(async () => { resolveOld({ ok: false, status: 401, json: async () => ({}) }) })
+        expect(screen.getByText('New destination unavailable')).toBeInTheDocument()
+        expect(screen.queryByText('Sign in to see the forecast')).not.toBeInTheDocument()
+        rerender(<WeatherForecastComponent />)
+        expect(screen.getByText('Create or select a trip to see weather forecasts')).toBeInTheDocument()
+        expect(screen.queryByText('New destination unavailable')).not.toBeInTheDocument()
+    })
+})
 
 describe('formatWeatherDate', () => {
     it('uses the destination timezone instead of the viewer timezone', () => {

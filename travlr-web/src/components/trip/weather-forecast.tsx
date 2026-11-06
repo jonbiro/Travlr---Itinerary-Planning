@@ -81,6 +81,10 @@ export function formatWeatherDate(
 }
 
 export function WeatherForecastComponent({ destination }: WeatherForecastProps) {
+    return <WeatherForecastForDestination key={destination ?? ""} destination={destination} />
+}
+
+function WeatherForecastForDestination({ destination }: WeatherForecastProps) {
     const [forecast, setForecast] = useState<WeatherForecast | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -90,13 +94,7 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
 
     useEffect(() => {
         const location = destination?.trim()
-        if (!location) {
-            setForecast(null)
-            setError(null)
-            setIsLoading(false)
-            setAuthState(null)
-            return
-        }
+        if (!location) return
         const requestedLocation: string = location
 
         const controller = new AbortController()
@@ -112,6 +110,7 @@ export function WeatherForecastComponent({ destination }: WeatherForecastProps) 
                     signal: controller.signal,
                 })
                 const payload = await response.json().catch(() => null) as unknown
+                if (controller.signal.aborted || !isCurrentRequest) return
 
                 if (response.status === 401) {
                     const nextAuthState = classifyAuthFailure(payload)
