@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ShareTripDialog } from "./share-trip-dialog"
@@ -32,6 +32,22 @@ afterEach(() => {
 })
 
 describe("ShareTripDialog", () => {
+    it("keeps the dialog open for the new trip and ignores the old response", async () => {
+        let resolveOld!: (value: ReturnType<typeof response>) => void
+        fetchMock.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
+        fetchMock.mockResolvedValueOnce(response({ members: [{ id: "new", name: "New member", email: "new@example.com" }] }))
+        const { rerender } = render(<ShareTripDialog tripId="trip-1" />)
+        fireEvent.click(screen.getByRole("button", { name: "Share" }))
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+        const oldSignal = (fetchMock.mock.calls[0][1] as { signal: AbortSignal }).signal
+        rerender(<ShareTripDialog tripId="trip-2" />)
+        expect(oldSignal.aborted).toBe(true)
+        await screen.findByText("New member")
+        await act(async () => { resolveOld(response({ error: "Not signed in" }, 401)) })
+        expect(screen.getByText("New member")).toBeInTheDocument()
+        expect(screen.queryByText("Ada Lovelace")).not.toBeInTheDocument()
+        expect(screen.queryByText("Sign in to share this trip")).not.toBeInTheDocument()
+    })
     it("loads collaborators when opened and renders the member count", async () => {
         let resolveMembers: (value: ReturnType<typeof response>) => void = () => undefined
         const membersResponse = new Promise<ReturnType<typeof response>>((resolve) => {

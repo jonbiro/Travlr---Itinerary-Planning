@@ -64,9 +64,13 @@ function normalizeMember(value: unknown): TripMember | null {
 }
 
 export function ShareTripDialog({ tripId }: { tripId?: string }) {
+    const [open, setOpen] = useState(false)
+    return <ShareTripDialogForTrip key={tripId ?? ""} tripId={tripId} open={open} setOpen={setOpen} />
+}
+
+function ShareTripDialogForTrip({ tripId, open, setOpen }: { tripId?: string; open: boolean; setOpen: (open: boolean) => void }) {
     const [email, setEmail] = useState("")
     const [isLoading, setIsLoading] = useState(false)
-    const [open, setOpen] = useState(false)
     const [isCopied, setIsCopied] = useState(false)
     const [authState, setAuthState] = useState<AuthState | null>(null)
     const [statusMessage, setStatusMessage] = useState("")
@@ -94,6 +98,7 @@ export function ShareTripDialog({ tripId }: { tripId?: string }) {
                 signal: controller.signal,
             })
             const { payload, text } = await readPayload(response)
+            if (controller.signal.aborted) return
 
             if (!response.ok) {
                 if (response.status === 401) setAuthState(classifyAuthFailure(payload))
@@ -120,16 +125,6 @@ export function ShareTripDialog({ tripId }: { tripId?: string }) {
                 setIsMembersLoading(false)
             }
         }
-    }, [tripId])
-
-    useEffect(() => {
-        memberRequestRef.current?.abort()
-        setIsCopied(false)
-        setAuthState(null)
-        setStatusMessage("")
-        setMembers([])
-        setMembersError(null)
-        setMemberToRemove(null)
     }, [tripId])
 
     useEffect(() => {
