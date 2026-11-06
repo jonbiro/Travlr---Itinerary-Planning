@@ -233,70 +233,71 @@ export default function DashboardPage() {
 
     const trip = trips.find((currentTrip) => currentTrip.id === selectedTripId) || null
 
-    const fetchTrips = useCallback(async () => {
+    const fetchTrips = useCallback(() => {
         requestRef.current?.abort()
         const controller = new AbortController()
         requestRef.current = controller
+        return fetch("/api/trips", { cache: "no-store", signal: controller.signal })
+            .then(async (response) => {
+                const payload: unknown = await response.json().catch(() => null)
+                if (controller.signal.aborted) return
+
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        const authConfigured = asRecord(payload)?.authConfigured !== false
+                        setLoadError({
+                            kind: authConfigured ? "auth" : "setup",
+                            message: authConfigured
+                                ? "Authentication is required to load trips."
+                                : getResponseError(payload, "Google OAuth and NextAuth must be configured before you can sign in."),
+                        })
+                        return
+                    }
+
+                    if (response.status === 503) {
+                        setLoadError({
+                            kind: "setup",
+                            message: getResponseError(payload, "The database is not configured."),
+                        })
+                        return
+                    }
+
+                    throw new Error(getResponseError(payload, "Unable to load trips right now."))
+                }
+
+                if (!Array.isArray(payload)) {
+                    throw new Error("We received an unexpected trips response.")
+                }
+
+                const mappedTrips = payload
+                    .map((value) => mapTrip(value))
+                    .filter((value): value is Trip => value !== null)
+
+                if (payload.length > 0 && mappedTrips.length === 0) {
+                    throw new Error("We couldn’t read your saved trips right now.")
+                }
+
+                if (!controller.signal.aborted) setTrips(mappedTrips)
+            }).catch((error: unknown) => {
+                if (controller.signal.aborted) return
+
+                setLoadError({
+                    kind: "generic",
+                    message: error instanceof Error ? error.message : "Unable to load trips right now.",
+                })
+            }).finally(() => {
+                if (requestRef.current === controller) {
+                    requestRef.current = null
+                    if (!controller.signal.aborted) setIsLoading(false)
+                }
+            })
+    }, [])
+
+    const retryTrips = () => {
         setIsLoading(true)
         setLoadError(null)
-
-        try {
-            const response = await fetch("/api/trips", {
-                cache: "no-store",
-                signal: controller.signal,
-            })
-            const payload: unknown = await response.json().catch(() => null)
-
-            if (!response.ok) {
-                if (response.status === 401) {
-                    const authConfigured = asRecord(payload)?.authConfigured !== false
-                    setLoadError({
-                        kind: authConfigured ? "auth" : "setup",
-                        message: authConfigured
-                            ? "Authentication is required to load trips."
-                            : getResponseError(payload, "Google OAuth and NextAuth must be configured before you can sign in."),
-                    })
-                    return
-                }
-
-                if (response.status === 503) {
-                    setLoadError({
-                        kind: "setup",
-                        message: getResponseError(payload, "The database is not configured."),
-                    })
-                    return
-                }
-
-                throw new Error(getResponseError(payload, "Unable to load trips right now."))
-            }
-
-            if (!Array.isArray(payload)) {
-                throw new Error("We received an unexpected trips response.")
-            }
-
-            const mappedTrips = payload
-                .map((value) => mapTrip(value))
-                .filter((value): value is Trip => value !== null)
-
-            if (payload.length > 0 && mappedTrips.length === 0) {
-                throw new Error("We couldn’t read your saved trips right now.")
-            }
-
-            if (!controller.signal.aborted) setTrips(mappedTrips)
-        } catch (error) {
-            if (controller.signal.aborted) return
-
-            setLoadError({
-                kind: "generic",
-                message: error instanceof Error ? error.message : "Unable to load trips right now.",
-            })
-        } finally {
-            if (requestRef.current === controller) {
-                requestRef.current = null
-                if (!controller.signal.aborted) setIsLoading(false)
-            }
-        }
-    }, [])
+        void fetchTrips()
+    }
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search)
@@ -500,7 +501,7 @@ export default function DashboardPage() {
                                 <span className="sr-only">Loading trips</span>
                             </div>
                         ) : loadError && !trip ? (
-                            <DashboardErrorState error={loadError} onRetry={() => void fetchTrips()} />
+                            <DashboardErrorState error={loadError} onRetry={retryTrips} />
                         ) : trip ? (
                             trip.days.map((day) => (
                                 <div key={day.id || day.day} className="space-y-2">
