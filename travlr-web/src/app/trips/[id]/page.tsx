@@ -144,46 +144,44 @@ function formatTime(activity: Activity): string | null {
 
 export default function TripDetailsPage() {
     const params = useParams<{ id: string | string[] }>()
-    const router = useRouter()
     const tripId = Array.isArray(params.id) ? params.id[0] : params.id
+    return <TripDetailsForId key={tripId ?? ""} tripId={tripId} />
+}
+
+function TripDetailsForId({ tripId }: { tripId?: string }) {
+    const router = useRouter()
     const [trip, setTrip] = useState<TripDetails | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [authState, setAuthState] = useState<AuthState | null>(null)
 
-    const loadTrip = useCallback(async (signal?: AbortSignal) => {
-        if (!tripId) return
+    const loadTrip = useCallback((signal?: AbortSignal) => {
+        if (!tripId) return Promise.resolve()
 
-        setIsLoading(true)
-        setError(null)
-        setAuthState(null)
+        return fetch(`/api/trips/${encodeURIComponent(tripId)}`, { signal, cache: "no-store" })
+            .then(async (response) => {
+                const payload: unknown = await response.json().catch(() => null)
+                if (signal?.aborted) return
+                if (response.status === 401) {
+                    const nextAuthState = classifyAuthFailure(payload)
+                    setAuthState(nextAuthState)
+                    throw new Error(nextAuthState === "setup"
+                        ? "Sign-in is not configured for this environment yet."
+                        : "Sign in to view this itinerary.")
+                }
+                if (response.status === 404) throw new Error("This trip could not be found.")
+                if (!response.ok) throw new Error("We couldn’t load this itinerary right now.")
 
-        try {
-            const response = await fetch(`/api/trips/${encodeURIComponent(tripId)}`, {
-                signal,
-                cache: "no-store",
+                const normalizedTrip = normalizeTrip(payload)
+                if (!normalizedTrip) throw new Error("We couldn’t read this itinerary right now.")
+
+                setTrip(normalizedTrip)
+            }).catch((loadError: unknown) => {
+                if (signal?.aborted) return
+                setError(loadError instanceof Error ? loadError.message : "We couldn’t load this itinerary right now.")
+            }).finally(() => {
+                if (!signal?.aborted) setIsLoading(false)
             })
-            const payload: unknown = await response.json().catch(() => null)
-            if (response.status === 401) {
-                const nextAuthState = classifyAuthFailure(payload)
-                setAuthState(nextAuthState)
-                throw new Error(nextAuthState === "setup"
-                    ? "Sign-in is not configured for this environment yet."
-                    : "Sign in to view this itinerary.")
-            }
-            if (response.status === 404) throw new Error("This trip could not be found.")
-            if (!response.ok) throw new Error("We couldn’t load this itinerary right now.")
-
-            const normalizedTrip = normalizeTrip(payload)
-            if (!normalizedTrip) throw new Error("We couldn’t read this itinerary right now.")
-
-            setTrip(normalizedTrip)
-        } catch (loadError) {
-            if (signal?.aborted) return
-            setError(loadError instanceof Error ? loadError.message : "We couldn’t load this itinerary right now.")
-        } finally {
-            if (!signal?.aborted) setIsLoading(false)
-        }
     }, [tripId])
 
     useEffect(() => {
@@ -227,7 +225,7 @@ export default function TripDetailsPage() {
                                 <Link href="/api/auth/signin">Sign in</Link>
                             </Button>
                         ) : (
-                            <Button type="button" variant="outline" onClick={() => void loadTrip()}>
+                            <Button type="button" variant="outline" onClick={() => { setIsLoading(true); setError(null); setAuthState(null); void loadTrip() }}>
                                 <RefreshCw className="h-4 w-4" />
                                 Try again
                             </Button>
