@@ -131,45 +131,40 @@ export default function TripsPage() {
     const [error, setError] = useState<TripsLoadError | null>(null)
     const requestRef = useRef<AbortController | null>(null)
 
-    const loadTrips = useCallback(async () => {
+    const loadTrips = useCallback(() => {
         requestRef.current?.abort()
         const controller = new AbortController()
         requestRef.current = controller
+        return fetch("/api/trips?view=summary", { cache: "no-store", signal: controller.signal })
+            .then(async (response) => {
+                const payload: unknown = await response.json().catch(() => null)
+                if (!response.ok) throw classifyLoadError(response, payload)
+                if (!Array.isArray(payload)) throw new Error("We couldn’t read your trips right now.")
+                if (controller.signal.aborted) return
+                setTrips(payload.map(normalizeTripSummary).filter((trip): trip is TripSummary => trip !== null))
+            }).catch((loadError: unknown) => {
+                if (controller.signal.aborted || (loadError instanceof Error && loadError.name === "AbortError")) return
+                setError(
+                    typeof loadError === "object" && loadError !== null && "kind" in loadError && "message" in loadError
+                        ? loadError as TripsLoadError
+                        : {
+                            kind: "generic",
+                            message: loadError instanceof Error ? loadError.message : "We couldn’t load your trips right now.",
+                        },
+                )
+            }).finally(() => {
+                if (requestRef.current === controller) {
+                    requestRef.current = null
+                    setIsLoading(false)
+                }
+            })
+    }, [])
+
+    const refreshTrips = () => {
         setIsLoading(true)
         setError(null)
-
-        try {
-            const response = await fetch("/api/trips?view=summary", {
-                cache: "no-store",
-                signal: controller.signal,
-            })
-            const payload: unknown = await response.json().catch(() => null)
-            if (!response.ok) {
-                throw classifyLoadError(response, payload)
-            }
-
-            if (!Array.isArray(payload)) throw new Error("We couldn’t read your trips right now.")
-
-            if (controller.signal.aborted) return
-            setTrips(payload.map(normalizeTripSummary).filter((trip): trip is TripSummary => trip !== null))
-        } catch (loadError) {
-            if (controller.signal.aborted || (loadError instanceof Error && loadError.name === "AbortError")) return
-
-            setError(
-                typeof loadError === "object" && loadError !== null && "kind" in loadError && "message" in loadError
-                    ? loadError as TripsLoadError
-                    : {
-                        kind: "generic",
-                        message: loadError instanceof Error ? loadError.message : "We couldn’t load your trips right now.",
-                    },
-            )
-        } finally {
-            if (requestRef.current === controller) {
-                requestRef.current = null
-                setIsLoading(false)
-            }
-        }
-    }, [])
+        void loadTrips()
+    }
 
     useEffect(() => {
         void loadTrips()
@@ -189,7 +184,7 @@ export default function TripsPage() {
                         <p className="mt-2 text-muted-foreground">Keep every itinerary close, from the first idea to the last memory.</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                        <Button type="button" variant="outline" onClick={() => void loadTrips()} disabled={isLoading}>
+                        <Button type="button" variant="outline" onClick={refreshTrips} disabled={isLoading}>
                             <RefreshCw className={isLoading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
                             Refresh
                         </Button>
@@ -210,7 +205,7 @@ export default function TripsPage() {
                         Loading your trips…
                     </div>
                 ) : error ? (
-                    <AccessState error={error} onRetry={() => void loadTrips()} />
+                    <AccessState error={error} onRetry={refreshTrips} />
                 ) : trips.length === 0 ? (
                     <div className="mx-auto flex min-h-64 max-w-xl flex-col items-center justify-center rounded-xl border border-dashed p-8 text-center">
                         <div className="rounded-full bg-primary/10 p-3 text-primary">
