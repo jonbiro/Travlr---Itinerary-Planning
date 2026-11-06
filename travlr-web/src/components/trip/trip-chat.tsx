@@ -155,7 +155,6 @@ export function collectNewItineraryToolResults(
 
 export function TripChat({ trip, onTripUpdate }: TripChatProps) {
     const [input, setInput] = useState("")
-    const [authState, setAuthState] = useState<AuthState | null>(null)
     const handledToolCalls = useRef(new Set<string>())
     const pendingTripUpdates = useRef(new Map<string, Trip>())
     const currentTripId = trip?.id ?? null
@@ -169,10 +168,7 @@ export function TripChat({ trip, onTripUpdate }: TripChatProps) {
     const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat" }), [])
     const { error, messages, regenerate, sendMessage, status } = useChat({ transport })
     const isLoading = status === "submitted" || status === "streaming"
-
-    useEffect(() => {
-        setAuthState(classifyChatAuthError(error))
-    }, [error])
+    const authState = classifyChatAuthError(error)
 
     useEffect(() => {
         const result = collectNewItineraryToolResults(
