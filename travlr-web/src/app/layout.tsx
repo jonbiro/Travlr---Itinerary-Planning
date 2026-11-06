@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist } from "next/font/google";
+import { GeistSans } from "geist/font/sans";
 import "./globals.css";
 import { Navbar } from "@/components/navbar";
 import { Toaster } from "@/components/ui/sonner";
@@ -8,11 +8,6 @@ import { InstallPrompt } from "@/components/pwa/install-prompt";
 import { isAuthConfigured } from "@/lib/auth";
 import { isDemoMode } from "@/lib/current-user";
 import { getSiteUrl, isPreviewDeployment } from "@/lib/site-url";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
 
 const siteUrl = getSiteUrl();
 
@@ -79,7 +74,7 @@ export default function RootLayout({
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
       <body
-        className={`${geistSans.variable} antialiased min-h-screen flex flex-col`}
+        className={`${GeistSans.variable} antialiased min-h-screen flex flex-col`}
       >
         <ServiceWorkerRegistration />
         <a
