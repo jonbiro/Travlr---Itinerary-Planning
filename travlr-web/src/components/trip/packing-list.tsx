@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -49,53 +49,39 @@ function getStorageKey(tripId: string | undefined, destination: string, days: nu
     return `${STORAGE_PREFIX}${encodeURIComponent(identity)}`
 }
 
-export function PackingList({
-    tripId,
-    destination,
-    days,
-    activities,
-}: {
+type PackingListProps = {
     tripId?: string
     destination: string
     days: number
     activities: string[]
-}) {
-    const [categories, setCategories] = useState<PackingCategory[]>([])
+}
+
+const subscribeHydration = () => () => {}
+const clientSnapshot = () => true
+const serverSnapshot = () => false
+
+export function PackingList(props: PackingListProps) {
+    const hydrated = useSyncExternalStore(subscribeHydration, clientSnapshot, serverSnapshot)
+    const storageKey = getStorageKey(props.tripId, props.destination, props.days, props.activities)
+    if (!hydrated) return null
+    return <PackingListForTrip key={storageKey} {...props} storageKey={storageKey} />
+}
+
+function PackingListForTrip({ destination, days, activities, storageKey }: PackingListProps & { storageKey: string }) {
+    const [initialCategories] = useState(() => {
+        try {
+            const stored = window.localStorage.getItem(storageKey)
+            return stored ? normalizeCategories(JSON.parse(stored)) : []
+        } catch {
+            return []
+        }
+    })
+    const [categories, setCategories] = useState<PackingCategory[]>(initialCategories)
     const [isLoading, setIsLoading] = useState(false)
-    const [generated, setGenerated] = useState(false)
+    const [generated, setGenerated] = useState(initialCategories.length > 0)
     const [error, setError] = useState<string | null>(null)
     const [authState, setAuthState] = useState<"auth" | "setup" | null>(null)
     const generationController = useRef<AbortController | null>(null)
-    const storageKey = useMemo(
-        () => getStorageKey(tripId, destination, days, activities),
-        [activities, days, destination, tripId],
-    )
-
-    useEffect(() => {
-        generationController.current?.abort()
-        setCategories([])
-        setGenerated(false)
-        setIsLoading(false)
-        setError(null)
-        setAuthState(null)
-
-        if (typeof window === "undefined") return
-
-        try {
-            const stored = window.localStorage.getItem(storageKey)
-            if (!stored) return
-
-            const savedCategories = normalizeCategories(JSON.parse(stored))
-            if (savedCategories.length > 0) {
-                setCategories(savedCategories)
-                setGenerated(true)
-            }
-        } catch {
-            // Ignore malformed or unavailable local storage and let the user
-            // generate a fresh list.
-        }
-    }, [storageKey])
-
     useEffect(() => () => generationController.current?.abort(), [])
 
     const persistCategories = (nextCategories: PackingCategory[]) => {
@@ -123,6 +109,7 @@ export function PackingList({
                 signal: controller.signal,
             })
             const data: unknown = await response.json().catch(() => null)
+            if (controller.signal.aborted) return
             if (response.status === 401) {
                 const nextAuthState = isRecord(data)
                     && (data.code === "AUTH_NOT_CONFIGURED" || data.authConfigured === false)
