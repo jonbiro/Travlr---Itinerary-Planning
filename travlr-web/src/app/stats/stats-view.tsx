@@ -270,75 +270,75 @@ export function TravelStatsDashboard() {
     const [error, setError] = useState<StatsLoadError | null>(null)
     const requestRef = useRef<AbortController | null>(null)
 
-    const loadTrips = useCallback(async () => {
+    const loadTrips = useCallback(() => {
         requestRef.current?.abort()
         const controller = new AbortController()
         requestRef.current = controller
+        return fetch("/api/trips?view=stats", { cache: "no-store", signal: controller.signal })
+            .then(async (response) => {
+                const payload: unknown = await response.json().catch(() => null)
+
+                if (!response.ok) {
+                    const record = asRecord(payload)
+                    const responseMessage = typeof record?.error === "string" && record.error.trim()
+                        ? record.error
+                        : "We couldn’t load your trips right now."
+                    const code = typeof record?.code === "string" ? record.code : ""
+                    const lowerMessage = responseMessage.toLowerCase()
+                    const kind: StatsLoadError["kind"] = code === "RATE_LIMIT_UNAVAILABLE"
+                        ? "generic"
+                        : response.status === 503
+                        || code === "DATABASE_NOT_CONFIGURED"
+                        || lowerMessage.includes("database is not configured")
+                        ? "setup"
+                        : response.status === 401
+                            || code === "AUTH_REQUIRED"
+                            || code === "AUTH_NOT_CONFIGURED"
+                            || record?.authConfigured === false
+                            ? (code === "AUTH_NOT_CONFIGURED" || record?.authConfigured === false ? "setup" : "auth")
+                            : "generic"
+
+                    throw {
+                        kind,
+                        message: kind === "setup" && (response.status === 503 || code === "DATABASE_NOT_CONFIGURED" || lowerMessage.includes("database is not configured"))
+                            ? "Connect a database to load and save trips in this environment."
+                            : kind === "setup"
+                                ? "Sign-in is not configured for this environment yet."
+                                : kind === "auth"
+                                    ? "Sign in to view your private travel stats."
+                                    : responseMessage,
+                    } satisfies StatsLoadError
+                }
+
+                const normalizedStats = normalizeTravelStats(payload)
+                if (controller.signal.aborted) return
+
+                setStats(normalizedStats)
+            }).catch((loadError: unknown) => {
+                if (controller.signal.aborted || (loadError instanceof Error && loadError.name === "AbortError")) return
+
+                setStats(null)
+                setError(
+                    typeof loadError === "object" && loadError !== null && "kind" in loadError && "message" in loadError
+                        ? loadError as StatsLoadError
+                        : {
+                            kind: "generic",
+                            message: loadError instanceof Error ? loadError.message : "We couldn’t load your trips right now.",
+                        },
+                )
+            }).finally(() => {
+                if (requestRef.current === controller) {
+                    requestRef.current = null
+                    setIsLoading(false)
+                }
+            })
+    }, [])
+
+    const refreshTrips = () => {
         setIsLoading(true)
         setError(null)
-
-        try {
-            const response = await fetch("/api/trips?view=stats", {
-                cache: "no-store",
-                signal: controller.signal,
-            })
-            const payload: unknown = await response.json().catch(() => null)
-
-            if (!response.ok) {
-                const record = asRecord(payload)
-                const responseMessage = typeof record?.error === "string" && record.error.trim()
-                    ? record.error
-                    : "We couldn’t load your trips right now."
-                const code = typeof record?.code === "string" ? record.code : ""
-                const lowerMessage = responseMessage.toLowerCase()
-                const kind: StatsLoadError["kind"] = code === "RATE_LIMIT_UNAVAILABLE"
-                    ? "generic"
-                    : response.status === 503
-                    || code === "DATABASE_NOT_CONFIGURED"
-                    || lowerMessage.includes("database is not configured")
-                    ? "setup"
-                    : response.status === 401
-                        || code === "AUTH_REQUIRED"
-                        || code === "AUTH_NOT_CONFIGURED"
-                        || record?.authConfigured === false
-                        ? (code === "AUTH_NOT_CONFIGURED" || record?.authConfigured === false ? "setup" : "auth")
-                        : "generic"
-
-                throw {
-                    kind,
-                    message: kind === "setup" && (response.status === 503 || code === "DATABASE_NOT_CONFIGURED" || lowerMessage.includes("database is not configured"))
-                        ? "Connect a database to load and save trips in this environment."
-                        : kind === "setup"
-                            ? "Sign-in is not configured for this environment yet."
-                            : kind === "auth"
-                                ? "Sign in to view your private travel stats."
-                                : responseMessage,
-                } satisfies StatsLoadError
-            }
-
-            const normalizedStats = normalizeTravelStats(payload)
-            if (controller.signal.aborted) return
-
-            setStats(normalizedStats)
-        } catch (loadError) {
-            if (controller.signal.aborted || (loadError instanceof Error && loadError.name === "AbortError")) return
-
-            setStats(null)
-            setError(
-                typeof loadError === "object" && loadError !== null && "kind" in loadError && "message" in loadError
-                    ? loadError as StatsLoadError
-                    : {
-                        kind: "generic",
-                        message: loadError instanceof Error ? loadError.message : "We couldn’t load your trips right now.",
-                    },
-            )
-        } finally {
-            if (requestRef.current === controller) {
-                requestRef.current = null
-                setIsLoading(false)
-            }
-        }
-    }, [])
+        void loadTrips()
+    }
 
     useEffect(() => {
         void loadTrips()
@@ -351,15 +351,15 @@ export function TravelStatsDashboard() {
 
     if (isLoading) return <LoadingState />
     if (error) {
-        if (error.kind !== "generic") return <AccessState error={error} onRetry={() => void loadTrips()} />
-        return <ErrorState message={error.message} onRetry={() => void loadTrips()} />
+        if (error.kind !== "generic") return <AccessState error={error} onRetry={refreshTrips} />
+        return <ErrorState message={error.message} onRetry={refreshTrips} />
     }
     if (!stats || stats.totalTrips === 0) return <EmptyState />
 
     return (
         <div className="space-y-6" aria-live="polite">
             <div className="flex justify-end">
-                <Button type="button" variant="outline" size="sm" onClick={() => void loadTrips()} disabled={isLoading}>
+                <Button type="button" variant="outline" size="sm" onClick={refreshTrips} disabled={isLoading}>
                     <RefreshCw className="h-4 w-4" />
                     Refresh
                 </Button>
